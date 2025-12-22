@@ -748,3 +748,208 @@ Recommend verifying operation with `DEBUG_MODE = true` before real machine testi
 | センサー高速化（連続測定モード） | ❌ 未実装 | 現在はブロッキング読み取り |
 | 速度PID制御 | ❌ 未実装 | 現在は固定速度 |
 | コーナー出口の挙動 | ❌ 未検討 | 片壁→壁なし遷移時の対応 |
+
+---
+
+## 改善提案: モード切り替え問題の解消 (2024-12-22)
+
+### 問題の背景
+
+パラメータチューニングの過程で、以下の問題が判明した：
+
+| パラメータ設定 | 結果 |
+|---------------|------|
+| Kp=0.08, Ki=0.05, Kd=0.02 / Kp=1.2, Ki=0.1, Kd=0.1 | 75%地点の曲がり角でゆらゆらしつつ壁に激突 |
+| Kp=0.08, Ki=0.05, Kd=0.02 / Kp=0.8, Ki=0.05, Kd=0.1 | 角にふらふらすることは避けられた |
+
+特に **コーナー付近でフラフラする現象** が顕著。
+
+### 原因分析
+
+現在の実装（`SteeringController.cpp:58-61`）：
+
+```cpp
+if (_currentMode != _previousMode) {
+    _centeringPID.reset();
+    _anglePID.reset();
+}
+```
+
+**コーナー進入時の典型的な挙動**:
+
+```
+フレーム1: BOTH → 距離PID計算
+フレーム2: LEFT → リセット！角度PID計算
+フレーム3: BOTH → リセット！距離PID計算
+フレーム4: LEFT → リセット！角度PID計算
+...（以降繰り返し）
+```
+
+**問題点**:
+1. コーナーで壁検出が不安定になり、モードが毎フレーム切り替わる
+2. 毎回PIDリセット → **積分項が蓄積されない**
+3. 毎回PIDリセット → **微分項の履歴がない**
+4. **実質P制御だけで動いている状態**
+
+### 改善案
+
+#### 案1: PIDリセットの廃止（最小変更）
+
+```cpp
+// SteeringController.cpp
+float SteeringController::calculate(const WallDetection& walls) {
+    // モード判定（変更なし）
+    _previousMode = _currentMode;
+    if (walls.left_valid && walls.right_valid) {
+        _currentMode = MODE_BOTH_WALLS;
+    } else if (walls.left_valid) {
+        _currentMode = MODE_LEFT_WALL;
+    } else if (walls.right_valid) {
+        _currentMode = MODE_RIGHT_WALL;
+    } else {
+        _currentMode = MODE_NO_WALLS;
+    }
+
+    // ★変更: リセットしない
+    // if (_currentMode != _previousMode) {
+    //     _centeringPID.reset();
+    //     _anglePID.reset();
+    // }
+
+    // 以降は従来通り...
+}
+```
+
+**メリット**: 変更が最小限、すぐ試せる
+**リスク**: 両壁モードの積分値が片壁モードに引き継がれて暴れる可能性
+
+#### 案2: ヒステリシス追加（モード切り替えを鈍感に）
+
+```cpp
+// SteeringController.h に追加
+static const int MODE_CHANGE_THRESHOLD = 3;  // 3フレーム連続で切り替え
+
+// SteeringController.cpp
+class SteeringController {
+private:
+    int _modeChangeCounter;
+    ControlMode _detectedMode;
+    // ...
+};
+
+float SteeringController::calculate(const WallDetection& walls) {
+    // モード検出
+    ControlMode detected;
+    if (walls.left_valid && walls.right_valid) {
+        detected = MODE_BOTH_WALLS;
+    } else if (walls.left_valid) {
+        detected = MODE_LEFT_WALL;
+    } else if (walls.right_valid) {
+        detected = MODE_RIGHT_WALL;
+    } else {
+        detected = MODE_NO_WALLS;
+    }
+
+    // ★ヒステリシス: 連続N回同じ判定で初めて切り替え
+    if (detected != _currentMode) {
+        _modeChangeCounter++;
+        if (_modeChangeCounter >= MODE_CHANGE_THRESHOLD) {
+            _previousMode = _currentMode;
+            _currentMode = detected;
+            _modeChangeCounter = 0;
+            // 切り替え時のみリセット（頻度が下がる）
+            _centeringPID.reset();
+            _anglePID.reset();
+        }
+    } else {
+        _modeChangeCounter = 0;
+    }
+
+    // 以降は従来通り...
+}
+```
+
+**メリット**: 頻繁なモード切り替えを防止、リセットの頻度が下がる
+**デメリット**: 実際のモード変化への反応が3フレーム遅れる
+
+#### 案3: 統一制御（モード切り替え廃止）← **推奨**
+
+両壁・片壁を区別せず、**常に同じPIDで制御**する設計に変更。
+
+```cpp
+// SteeringController.cpp - 全面書き換え
+float SteeringController::calculate(const WallDetection& walls) {
+    float target_offset = 0.0;   // 目標: 中央（距離差=0）
+    float current_offset = 0.0;
+
+    if (walls.left_valid && walls.right_valid) {
+        // 両壁: 距離差をそのまま誤差として使う
+        current_offset = walls.right_distance - walls.left_distance;
+
+    } else if (walls.left_valid) {
+        // 左壁のみ: 目標距離との差 + 角度による補正
+        // 目標距離から離れていれば正（右へステア）
+        current_offset = (TARGET_SINGLE_WALL_DISTANCE - walls.left_distance)
+                       + walls.left_angle * ANGLE_TO_OFFSET_GAIN;
+
+    } else if (walls.right_valid) {
+        // 右壁のみ: 目標距離との差 + 角度による補正
+        // 目標距離から離れていれば負（左へステア）
+        current_offset = (walls.right_distance - TARGET_SINGLE_WALL_DISTANCE)
+                       - walls.right_angle * ANGLE_TO_OFFSET_GAIN;
+
+    } else {
+        // 壁なし: 前回の出力を維持
+        return _lastOutput;
+    }
+
+    // ★常に同じPIDで計算（リセットなし）
+    float steering = _unifiedPID.compute(target_offset, current_offset);
+
+    // 安全距離制約（従来通り）
+    if (walls.left_valid && walls.left_distance < MIN_SAFE_DISTANCE) {
+        steering += (MIN_SAFE_DISTANCE - walls.left_distance) * DISTANCE_AVOID_GAIN;
+    }
+    if (walls.right_valid && walls.right_distance < MIN_SAFE_DISTANCE) {
+        steering -= (MIN_SAFE_DISTANCE - walls.right_distance) * DISTANCE_AVOID_GAIN;
+    }
+
+    steering = constrain(steering, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    _lastOutput = steering;
+
+    return steering;
+}
+```
+
+**Config.h に追加**:
+```cpp
+const float TARGET_SINGLE_WALL_DISTANCE = 400.0;  // 片壁時の目標距離（mm）
+const float ANGLE_TO_OFFSET_GAIN = 5.0;           // 角度→距離オフセット変換ゲイン
+```
+
+**メリット**:
+- PIDが常に蓄積を維持（I項・D項が正しく機能）
+- モード切り替えによるジャンプがない
+- コード構造がシンプルになる
+
+**デメリット**:
+- 設計思想の大幅変更（テストが必要）
+- 角度→距離オフセット変換のゲイン調整が必要
+
+### 実装優先順位
+
+1. **まず案1を試す**（5分で変更可能）
+   - リセット処理をコメントアウトするだけ
+   - 改善すれば案3に進む価値あり
+
+2. **改善しなければ案2を試す**
+   - ヒステリシス追加で様子を見る
+
+3. **本格対応として案3を実装**
+   - 統一制御への移行
+
+### 次のアクション
+
+- [ ] 案1の実装・テスト
+- [ ] 結果に応じて案2または案3を検討
+- [ ] パラメータ再チューニング
