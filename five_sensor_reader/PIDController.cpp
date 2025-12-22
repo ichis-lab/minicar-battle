@@ -3,14 +3,20 @@
  *
  * 汎用PIDコントローラ（実装）
  * Generic PID Controller Implementation
+ *
+ * 機能:
+ * - アンチワインドアップ（積分値制限）
+ * - 不感帯（微小誤差での振動防止）
+ * - 微分フィルタ（センサーノイズ抑制）
  */
 
 #include "PIDController.h"
+#include "Config.h"
 
 PIDController::PIDController() {
     gains = {0.0, 0.0, 0.0};
-    state = {0.0, 0.0, 0};
-    config = {-180.0, 180.0, -100.0, 100.0, 0.0};
+    state = {0.0, 0.0, 0.0, 0};  // prev_error, integral, filtered_derivative, last_time
+    config = {-180.0, 180.0, -100.0, 100.0, 0.0, DERIVATIVE_FILTER_ALPHA};
     first_run = true;
 }
 
@@ -39,6 +45,10 @@ void PIDController::setDeadband(float deadband) {
     config.deadband = deadband;
 }
 
+void PIDController::setFilterAlpha(float alpha) {
+    config.filter_alpha = constrain(alpha, 0.0, 1.0);
+}
+
 float PIDController::compute(float setpoint, float measured) {
     unsigned long now = millis();
 
@@ -46,6 +56,7 @@ float PIDController::compute(float setpoint, float measured) {
     if (first_run) {
         state.last_time = now;
         state.prev_error = setpoint - measured;
+        state.filtered_derivative = 0.0;
         first_run = false;
         return 0.0;
     }
@@ -70,9 +81,14 @@ float PIDController::compute(float setpoint, float measured) {
     state.integral = constrain(state.integral, config.integral_min, config.integral_max);
     float I = gains.Ki * state.integral;
 
-    // D項 / Derivative term
-    float derivative = (error - state.prev_error) / dt;
-    float D = gains.Kd * derivative;
+    // D項（ローパスフィルタ付き）/ Derivative term with low-pass filter
+    float raw_derivative = (error - state.prev_error) / dt;
+
+    // 一次ローパスフィルタ: filtered = alpha * raw + (1 - alpha) * prev_filtered
+    state.filtered_derivative = config.filter_alpha * raw_derivative
+                               + (1.0 - config.filter_alpha) * state.filtered_derivative;
+
+    float D = gains.Kd * state.filtered_derivative;
 
     // 出力の計算 / Calculate output
     float output = P + I + D;
@@ -90,6 +106,7 @@ float PIDController::compute(float setpoint, float measured) {
 void PIDController::reset() {
     state.prev_error = 0.0;
     state.integral = 0.0;
+    state.filtered_derivative = 0.0;
     state.last_time = millis();
     first_run = true;
 }
@@ -103,7 +120,7 @@ float PIDController::getIntegral() const {
 }
 
 float PIDController::getDerivative() const {
-    return 0.0;  // 簡略化（現在のD値は保存していない）
+    return gains.Kd * state.filtered_derivative;
 }
 
 float PIDController::getError() const {

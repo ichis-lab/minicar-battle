@@ -2,7 +2,13 @@
  * WallDetector.cpp
  *
  * 壁検出クラス（実装）
- * 2つのセンサーペアから壁の直線を推定し、距離と角度を計算
+ * 2つのセンサーペアから壁の直線を推定し、垂直距離と角度を計算
+ *
+ * 計算方法:
+ * 1. 各センサーの極座標（距離, 角度）を直交座標（x, y）に変換
+ * 2. 2点を通る直線の方程式を求める
+ * 3. 原点（車体位置）から直線への垂直距離を計算
+ * 4. 直線の傾きから壁角度を計算
  */
 
 #include "WallDetector.h"
@@ -35,24 +41,45 @@ bool WallDetector::calculateWall(uint16_t dist_far, uint16_t dist_near,
     float rad_near = angle_near * PI / 180.0;
 
     // 各センサーの検出点（車体座標系）
-    float x_far = dist_far * sin(rad_far);
-    float y_far = dist_far * cos(rad_far);
-    float x_near = dist_near * sin(rad_near);
-    float y_near = dist_near * cos(rad_near);
+    // x: 左が負、右が正
+    // y: 前方が正
+    float x1 = dist_far * sin(rad_far);
+    float y1 = dist_far * cos(rad_far);
+    float x2 = dist_near * sin(rad_near);
+    float y2 = dist_near * cos(rad_near);
 
-    // 2点を結ぶ直線の角度（壁の向き）
-    float dx = x_far - x_near;
-    float dy = y_far - y_near;
+    // 2点間の差分
+    float dx = x2 - x1;
+    float dy = y2 - y1;
 
+    // 2点間の距離
+    float line_length = sqrt(dx * dx + dy * dy);
+    if (line_length < 0.001) {
+        // 2点がほぼ同じ位置（計算不能）
+        return false;
+    }
+
+    // =========================================================================
+    // 壁までの垂直距離を計算
+    // 2点 P1(x1,y1), P2(x2,y2) を通る直線と原点(0,0)の距離
+    // 公式: d = |x1*y2 - x2*y1| / sqrt((x2-x1)^2 + (y2-y1)^2)
+    // =========================================================================
+    float cross_product = x1 * y2 - x2 * y1;
+    out_distance = abs(cross_product) / line_length;
+
+    // =========================================================================
+    // 壁の角度を計算
+    // 直線が車体正面方向（y軸）となす角度
+    // angle > 0: 前方で壁に近づいている
+    // angle < 0: 前方で壁から離れている
+    // angle = 0: 壁と平行
+    // =========================================================================
     if (abs(dy) < 0.001) {
         // ほぼ水平な壁（車体と平行）
         out_angle = 0.0;
     } else {
         out_angle = atan2(dx, dy) * 180.0 / PI;
     }
-
-    // 壁までの距離（2点の中点からの垂直距離を近似）
-    out_distance = (dist_far + dist_near) / 2.0;
 
     return true;
 }

@@ -13,9 +13,6 @@
 #include "WallDetector.h"
 #include "PIDController.h"
 
-// 前方宣言
-struct SensorData;
-
 // 制御モード / Control modes
 enum ControlMode {
     MODE_BOTH_WALLS,    // 両壁検出 → 中央走行 / Both walls → center driving
@@ -26,8 +23,8 @@ enum ControlMode {
 
 class SteeringController {
 private:
-    PIDController centeringPID;     // 中央走行用PID / Centering PID
-    PIDController wallFollowPID;    // 壁追従用PID / Wall following PID
+    PIDController centeringPID;     // 中央走行用PID（両壁モード：距離制御）
+    PIDController anglePID;         // 角度制御用PID（片壁モード：壁と平行維持）
     ControlMode currentMode;
     ControlMode previousMode;
 
@@ -38,7 +35,7 @@ public:
     void begin();
 
     // ステアリング角度を計算 / Calculate steering angle
-    float calculate(const WallDetection& walls, const SensorData* sensorData);
+    float calculate(const WallDetection& walls);
 
     // 現在のモードを取得 / Get current mode
     ControlMode getMode() const { return currentMode; }

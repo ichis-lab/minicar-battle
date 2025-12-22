@@ -120,7 +120,7 @@ void loop() {
     // =========================================================================
     // Phase 4: ステアリング角度計算（PID制御）
     // =========================================================================
-    float steering_angle = steeringController.calculate(walls, sensorData);
+    float steering_angle = steeringController.calculate(walls);
 
     // デバッグ: モードとステアリング表示
     steeringController.printDebugInfo();
