@@ -81,7 +81,7 @@ float SteeringController::calculate(const WallDetection& walls) {
             // 壁角度 > 0: 壁に向かっている → 右へステア（正）
             // 壁角度 < 0: 壁から離れている → 左へステア（負）
             // =================================================================
-            steering_angle = _anglePID.compute(0.0, walls.left_angle);
+            steering_angle = -_anglePID.compute(0.0, walls.left_angle);
 
             // 安全距離制約: 壁に近すぎる場合は離れる方向に補正
             if (walls.left_distance < MIN_SAFE_DISTANCE) {
