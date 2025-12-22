@@ -32,7 +32,7 @@ void Actuator::begin() {
 
 void Actuator::setSteering(float angle_degrees) {
   // 角度をパルス幅に変換
-  // 正の角度 = 右へ = パルス幅小、負の角度 = 左へ = パルス幅大
+  // 正の角度 = 右へ = パルス幅大、負の角度 = 左へ = パルス幅小
   int pulse_us = map((int)(angle_degrees * 10), -900, 900, SERVO_MAX, SERVO_MIN);
 
   // 範囲チェック
