@@ -2,7 +2,6 @@
  * SensorReader.cpp
  *
  * センサー読み取りクラス（実装）
- * 高速化対応版：timing budget設定と連続測定モード
  */
 
 #include "SensorReader.h"
@@ -48,40 +47,27 @@ bool SensorReader::begin() {
       return false;
     }
 
-    // 高速化: Timing Budget を設定 (20ms = 理論上50Hz per sensor)
-    // High Speed モードに設定
-    sensors[i].setMeasurementTimingBudgetMicroSeconds(SENSOR_TIMING_BUDGET);
-
-    // 連続測定モード開始
-    sensors[i].startRangeContinuous();
-
-    Logger::println(" OK (High Speed)");
+    Logger::println(" OK");
   }
 
-  Logger::println("=== All sensors initialized (25Hz mode) ===");
+  Logger::println("=== All sensors initialized ===");
   return true;
 }
 
 void SensorReader::readAll() {
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
     selectChannel(SENSOR_CHANNELS[i]);
+    sensors[i].rangingTest(&measurements[i], false);
 
-    // 連続モードでの読み取り
-    if (sensors[i].isRangeComplete()) {
-      uint16_t range = sensors[i].readRange();
-      uint8_t status = sensors[i].readRangeStatus();
+    sensorData[i].status = measurements[i].RangeStatus;
 
-      sensorData[i].status = status;
-
-      if (status == 0) {  // 0 = valid measurement
-        sensorData[i].distance = range;
-        sensorData[i].valid = true;
-      } else {
-        sensorData[i].distance = 0;
-        sensorData[i].valid = false;
-      }
+    if (measurements[i].RangeStatus != 4) {
+      sensorData[i].distance = measurements[i].RangeMilliMeter;
+      sensorData[i].valid = true;
+    } else {
+      sensorData[i].distance = 0;
+      sensorData[i].valid = false;
     }
-    // 測定完了していない場合は前回の値を保持
   }
 }
 
