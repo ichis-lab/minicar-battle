@@ -3,9 +3,6 @@
  *
  * 汎用PIDコントローラ（宣言）
  * Generic PID Controller
- *
- * 任意の制御対象に使用可能な汎用PID実装
- * Reusable PID implementation for any control target
  */
 
 #ifndef PID_CONTROLLER_H
@@ -13,52 +10,59 @@
 
 #include <Arduino.h>
 
-class PIDController {
-private:
+// PIDゲイン構造体
+struct PIDGains {
     float Kp;           // 比例ゲイン / Proportional gain
     float Ki;           // 積分ゲイン / Integral gain
     float Kd;           // 微分ゲイン / Derivative gain
+};
 
-    float prev_error;   // 前回の偏差 / Previous error
+// PID状態構造体
+struct PIDState {
+    float prev_error;   // 前回の誤差 / Previous error
     float integral;     // 積分値 / Integral accumulator
-    unsigned long prev_time;  // 前回の計算時刻 / Previous calculation time
+    unsigned long last_time;  // 前回の計算時刻 / Last calculation time
+};
 
-    float integral_limit;  // 積分値上限 / Integral windup limit
-    float output_min;      // 出力下限 / Output minimum
-    float output_max;      // 出力上限 / Output maximum
+// PID設定構造体
+struct PIDConfig {
+    float output_min;   // 出力下限 / Output minimum
+    float output_max;   // 出力上限 / Output maximum
+    float integral_min; // 積分下限（アンチワインドアップ）/ Integral min (anti-windup)
+    float integral_max; // 積分上限（アンチワインドアップ）/ Integral max (anti-windup)
+    float deadband;     // 不感帯 / Deadband threshold
+};
+
+class PIDController {
+private:
+    PIDGains gains;
+    PIDState state;
+    PIDConfig config;
+    bool first_run;
 
 public:
-    /**
-     * コンストラクタ
-     * @param kp 比例ゲイン / Proportional gain
-     * @param ki 積分ゲイン / Integral gain
-     * @param kd 微分ゲイン / Derivative gain
-     * @param i_limit 積分値上限 / Integral windup limit
-     * @param out_min 出力下限 / Output minimum
-     * @param out_max 出力上限 / Output maximum
-     */
-    PIDController(float kp, float ki, float kd,
-                  float i_limit, float out_min, float out_max);
+    PIDController();
 
-    /**
-     * PID計算を実行
-     * Execute PID calculation
-     * @param error 現在の偏差 / Current error
-     * @return 制御出力 / Control output
-     */
-    float calculate(float error);
+    // 初期化 / Initialize
+    void begin(float Kp, float Ki, float Kd);
 
-    /**
-     * 内部状態をリセット
-     * Reset internal state
-     */
+    // 設定 / Configuration
+    void setGains(float Kp, float Ki, float Kd);
+    void setOutputLimits(float min, float max);
+    void setIntegralLimits(float min, float max);
+    void setDeadband(float deadband);
+
+    // 計算 / Calculation
+    float compute(float setpoint, float measured);
+
+    // リセット / Reset
     void reset();
 
-    /**
-     * ゲインを動的に変更
-     * Dynamically update gains
-     */
-    void setGains(float kp, float ki, float kd);
+    // デバッグ用 / For debugging
+    float getProportional() const;
+    float getIntegral() const;
+    float getDerivative() const;
+    float getError() const;
 };
 
 #endif // PID_CONTROLLER_H

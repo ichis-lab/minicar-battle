@@ -1,447 +1,671 @@
-# Openness-Based PID Control Implementation Plan
-# 開放度ベースPID制御 実装計画
+# PID制御実装計画 / PID Control Implementation Plan
 
-## 目的 / Purpose
+## 概要 / Overview
 
-左壁追従から「左右の開放度バランス」へ制御目標を転換し、
-広いセクションでの不要な蛇行を防ぐPID制御を実装する。
+このドキュメントは、自動運転ミニカーの壁追従制御システムにPID制御を導入するための実装計画です。
 
-Implement PID control that shifts from "left wall following" to 
-"left-right openness balance" to prevent unnecessary oscillation 
-in wide sections.
+This document outlines the implementation plan for introducing PID control to the autonomous minicar's wall-following control system.
 
 ---
 
-## 現状 / Current State
+## 現状分析 / Current State Analysis
 
-### 既存ファイル構成 / Existing File Structure
-
-```
-five_sensor_reader/
-├── five_sensor_reader.ino  # メインループ
-├── Config.h                # 定数・設定値
-├── SensorManager.h/.cpp    # センサー管理
-├── WallDetector.h/.cpp     # 壁検出（置き換え対象）
-├── SteeringController.h/.cpp # ステアリング制御（置き換え対象）
-├── Actuator.h/.cpp         # アクチュエーター制御
-└── Logger.h/.cpp           # ログ出力
-```
-
-### センサー配置 / Sensor Layout
+### 現在のアーキテクチャ / Current Architecture
 
 ```
-Index 0: -70° (左側方)
-Index 1: -20° (左前方)
-Index 2:   0° (前方)
-Index 3: +20° (右前方)
-Index 4: +70° (右側方)
+┌─────────────────────────────────────────────────────────────┐
+│                    Arduino Nano R4                          │
+├─────────────────────────────────────────────────────────────┤
+│  SensorReader → WallDetector → SteeringController → Actuator│
+│      ↑              ↑                ↑               ↓      │
+│  5x VL53L0X     幾何学計算      P制御のみ        Servo/ESC  │
+│  (10Hz)        Geometry       P-only             PWM        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
+### 現在の問題点 / Current Issues
 
-## 実装内容 / Implementation Scope
+| 問題 / Issue | 原因 / Cause | 影響 / Impact |
+|--------------|--------------|---------------|
+| オーバーシュート / Overshoot | I項・D項がない / No I or D terms | 中央復帰時に振動 / Oscillation when returning to center |
+| 定常偏差 / Steady-state error | 積分項なし / No integral term | 目標距離に収束しない / Cannot converge to target distance |
+| 急変化への反応遅れ / Slow response to rapid changes | 微分項なし / No derivative term | カーブ入口で追従遅れ / Lag at curve entry |
+| 低速制御ループ / Slow control loop | 10Hz (100ms) | 高速走行で追従不可 / Cannot track at high speed |
+| 固定速度 / Fixed speed | 動的速度制御なし / No dynamic speed control | コーナーでスリップ / Slip at corners |
 
-### 新規作成ファイル / New Files to Create
+### 現在のパラメータ / Current Parameters
 
-```
-five_sensor_reader/
-├── OpennessCalculator.h    # 開放度計算クラス（宣言）
-├── OpennessCalculator.cpp  # 開放度計算クラス（実装）
-├── PIDController.h         # 汎用PIDコントローラ（宣言）
-└── PIDController.cpp       # 汎用PIDコントローラ（実装）
-```
-
-### 修正ファイル / Files to Modify
-
-```
-├── Config.h                # 新パラメータ追加
-├── SteeringController.h/.cpp # 内部ロジック置き換え
-└── five_sensor_reader.ino  # 必要に応じて調整
+```cpp
+// Config.h - 現在の設定 / Current settings
+const unsigned long MEASUREMENT_INTERVAL = 100;  // 100ms = 10Hz
+const float CENTERING_GAIN = 0.05;               // P制御のみ / P-only
+const float LEFT_AVOID_GAIN = 0.1;               // 回避補正 / Avoidance correction
+const float MAX_STEERING_ANGLE = 30.0;           // 最大操舵角 / Max steering angle
+const float BASE_SPEED_PULSE = 1.45;             // 固定速度 / Fixed speed (ms)
 ```
 
 ---
 
-## クラス設計 / Class Design
+## 新アーキテクチャ設計 / New Architecture Design
 
-### 1. PIDController（汎用PIDコントローラ）
+### 目標アーキテクチャ / Target Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Arduino Nano R4                              │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌──────────────────────────┐ │
+│  │SensorReader │───▶│WallDetector │───▶│    PIDController         │ │
+│  │(25-50Hz)    │    │             │    │  ├─ SteeringPID          │ │
+│  └─────────────┘    └─────────────┘    │  └─ SpeedPID (optional)  │ │
+│        │                               └────────────┬─────────────┘ │
+│        │                                            │               │
+│        │            ┌─────────────┐                 │               │
+│        └───────────▶│ControlMode  │─────────────────┤               │
+│                     │ Manager     │                 │               │
+│                     └─────────────┘                 ▼               │
+│                                              ┌─────────────┐        │
+│                                              │  Actuator   │        │
+│                                              │ Servo + ESC │        │
+│                                              └─────────────┘        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 新規クラス設計 / New Class Design
+
+#### 1. PIDController クラス / PIDController Class
 
 ```cpp
 // PIDController.h
-
 #ifndef PID_CONTROLLER_H
 #define PID_CONTROLLER_H
 
 #include <Arduino.h>
 
-/**
- * 汎用PIDコントローラ
- * Generic PID Controller
- * 
- * 任意の制御対象に使用可能な汎用PID実装
- * Reusable PID implementation for any control target
- */
+struct PIDGains {
+    float Kp;           // 比例ゲイン / Proportional gain
+    float Ki;           // 積分ゲイン / Integral gain
+    float Kd;           // 微分ゲイン / Derivative gain
+};
+
+struct PIDState {
+    float prev_error;   // 前回の誤差 / Previous error
+    float integral;     // 積分値 / Integral accumulator
+    unsigned long last_time;  // 前回の計算時刻 / Last calculation time
+};
+
+struct PIDConfig {
+    float output_min;   // 出力下限 / Output minimum
+    float output_max;   // 出力上限 / Output maximum
+    float integral_min; // 積分下限（アンチワインドアップ）/ Integral min (anti-windup)
+    float integral_max; // 積分上限（アンチワインドアップ）/ Integral max (anti-windup)
+    float deadband;     // 不感帯 / Deadband threshold
+};
+
 class PIDController {
 private:
-    float Kp;
-    float Ki;
-    float Kd;
-    
-    float prev_error;
-    float integral;
-    unsigned long prev_time;
-    
-    float integral_limit;
-    float output_min;
-    float output_max;
+    PIDGains gains;
+    PIDState state;
+    PIDConfig config;
+    bool first_run;
 
 public:
-    /**
-     * コンストラクタ
-     * @param kp 比例ゲイン / Proportional gain
-     * @param ki 積分ゲイン / Integral gain
-     * @param kd 微分ゲイン / Derivative gain
-     * @param i_limit 積分値上限 / Integral windup limit
-     * @param out_min 出力下限 / Output minimum
-     * @param out_max 出力上限 / Output maximum
-     */
-    PIDController(float kp, float ki, float kd, 
-                  float i_limit, float out_min, float out_max);
+    PIDController();
     
-    /**
-     * PID計算を実行
-     * Execute PID calculation
-     * @param error 現在の偏差 / Current error
-     * @return 制御出力 / Control output
-     */
-    float calculate(float error);
+    // 初期化 / Initialize
+    void begin(float Kp, float Ki, float Kd);
     
-    /**
-     * 内部状態をリセット
-     * Reset internal state
-     */
+    // 設定 / Configuration
+    void setGains(float Kp, float Ki, float Kd);
+    void setOutputLimits(float min, float max);
+    void setIntegralLimits(float min, float max);
+    void setDeadband(float deadband);
+    
+    // 計算 / Calculation
+    float compute(float setpoint, float measured);
+    
+    // リセット / Reset
     void reset();
     
-    /**
-     * ゲインを動的に変更（オプション）
-     * Dynamically update gains (optional)
-     */
-    void setGains(float kp, float ki, float kd);
+    // デバッグ用 / For debugging
+    float getProportional() const;
+    float getIntegral() const;
+    float getDerivative() const;
+    float getError() const;
 };
 
 #endif // PID_CONTROLLER_H
 ```
 
-### 2. OpennessCalculator（開放度計算）
+#### 2. PIDController 実装 / PIDController Implementation
 
 ```cpp
-// OpennessCalculator.h
+// PIDController.cpp
+#include "PIDController.h"
 
-#ifndef OPENNESS_CALCULATOR_H
-#define OPENNESS_CALCULATOR_H
+PIDController::PIDController() {
+    gains = {0.0, 0.0, 0.0};
+    state = {0.0, 0.0, 0};
+    config = {-180.0, 180.0, -100.0, 100.0, 0.0};
+    first_run = true;
+}
 
-#include <Arduino.h>
-#include "Config.h"
+void PIDController::begin(float Kp, float Ki, float Kd) {
+    setGains(Kp, Ki, Kd);
+    reset();
+}
 
-/**
- * 開放度計算結果
- * Openness calculation result
- */
-struct OpennessData {
-    float left_openness;    // 左側開放度 / Left side openness
-    float right_openness;   // 右側開放度 / Right side openness
-    float error;            // 偏差 (right - left) / Error
-    bool valid;             // 計算が有効か / Calculation validity
-};
+void PIDController::setGains(float Kp, float Ki, float Kd) {
+    gains.Kp = Kp;
+    gains.Ki = Ki;
+    gains.Kd = Kd;
+}
 
-/**
- * 開放度計算クラス
- * Openness Calculator
- * 
- * センサーデータから左右の開放度を計算
- * Calculates left/right openness from sensor data
- */
-class OpennessCalculator {
-private:
-    float weight_far;   // 70°センサーの重み
-    float weight_near;  // 20°センサーの重み
+void PIDController::setOutputLimits(float min, float max) {
+    config.output_min = min;
+    config.output_max = max;
+}
+
+void PIDController::setIntegralLimits(float min, float max) {
+    config.integral_min = min;
+    config.integral_max = max;
+}
+
+void PIDController::setDeadband(float deadband) {
+    config.deadband = deadband;
+}
+
+float PIDController::compute(float setpoint, float measured) {
+    unsigned long now = millis();
     
-    /**
-     * 片側の開放度を計算
-     * Calculate openness for one side
-     */
-    float calculateSideOpenness(uint16_t dist_far, uint16_t dist_near);
+    // 初回実行時の処理 / First run handling
+    if (first_run) {
+        state.last_time = now;
+        state.prev_error = setpoint - measured;
+        first_run = false;
+        return 0.0;
+    }
     
-    /**
-     * センサー値の妥当性チェック
-     * Validate sensor reading
-     */
-    bool isValidReading(uint16_t distance);
-
-public:
-    /**
-     * コンストラクタ
-     * @param w_far 70°センサーの重み / Weight for 70° sensors
-     * @param w_near 20°センサーの重み / Weight for 20° sensors
-     */
-    OpennessCalculator(float w_far, float w_near);
+    // 時間差の計算 / Calculate time delta
+    float dt = (now - state.last_time) / 1000.0;  // 秒に変換 / Convert to seconds
+    if (dt <= 0.0) dt = 0.001;  // ゼロ除算防止 / Prevent division by zero
     
-    /**
-     * 開放度を計算
-     * Calculate openness
-     * @param distances センサー距離配列[5] / Sensor distance array[5]
-     * @return 開放度データ / Openness data
-     */
-    OpennessData calculate(const uint16_t distances[5]);
-};
+    // 誤差の計算 / Calculate error
+    float error = setpoint - measured;
+    
+    // 不感帯の適用 / Apply deadband
+    if (abs(error) < config.deadband) {
+        error = 0.0;
+    }
+    
+    // P項 / Proportional term
+    float P = gains.Kp * error;
+    
+    // I項（アンチワインドアップ付き）/ Integral term with anti-windup
+    state.integral += error * dt;
+    state.integral = constrain(state.integral, config.integral_min, config.integral_max);
+    float I = gains.Ki * state.integral;
+    
+    // D項（測定値微分を使用して目標値急変時のキックを防止）
+    // Derivative term (using measurement derivative to prevent setpoint kick)
+    float derivative = (error - state.prev_error) / dt;
+    float D = gains.Kd * derivative;
+    
+    // 出力の計算 / Calculate output
+    float output = P + I + D;
+    
+    // 出力制限 / Output limiting
+    output = constrain(output, config.output_min, config.output_max);
+    
+    // 状態の更新 / Update state
+    state.prev_error = error;
+    state.last_time = now;
+    
+    return output;
+}
 
-#endif // OPENNESS_CALCULATOR_H
+void PIDController::reset() {
+    state.prev_error = 0.0;
+    state.integral = 0.0;
+    state.last_time = millis();
+    first_run = true;
+}
+
+float PIDController::getProportional() const { return gains.Kp * state.prev_error; }
+float PIDController::getIntegral() const { return gains.Ki * state.integral; }
+float PIDController::getDerivative() const { return 0.0; }  // 簡略化 / Simplified
+float PIDController::getError() const { return state.prev_error; }
 ```
 
-### 3. SteeringController（修正版）
+---
+
+## センサー高速化 / Sensor Speed Optimization
+
+### Timing Budget の設定 / Timing Budget Configuration
+
+VL53L0Xのtiming budgetを調整して制御周波数を向上させます。
+
+Adjust VL53L0X timing budget to improve control frequency.
+
+#### 変更箇所 / Changes Required
 
 ```cpp
-// SteeringController.h (修正版 / Modified)
+// SensorReader.cpp - begin() メソッドに追加 / Add to begin() method
 
+bool SensorReader::begin() {
+    Wire.begin();
+    
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+        selectChannel(SENSOR_CHANNELS[i]);
+        delay(10);
+        
+        if (!sensors[i].begin()) {
+            return false;
+        }
+        
+        // ★追加: High Speed モードに設定 / ADD: Set High Speed mode
+        // 20ms timing budget = 理論上50Hz / 20ms = theoretical 50Hz per sensor
+        sensors[i].setMeasurementTimingBudget(20000);
+        
+        // ★追加: 連続測定モード開始 / ADD: Start continuous measurement mode
+        sensors[i].startRangeContinuous();
+    }
+    
+    return true;
+}
+
+// readAll() メソッドも変更 / Also modify readAll() method
+void SensorReader::readAll() {
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+        selectChannel(SENSOR_CHANNELS[i]);
+        
+        // 連続モードでの読み取り / Read in continuous mode
+        if (sensors[i].isRangeComplete()) {
+            sensorData[i].distance = sensors[i].readRange();
+            sensorData[i].valid = (sensors[i].readRangeStatus() == 0);
+        }
+    }
+}
+```
+
+### Config.h の更新 / Config.h Updates
+
+```cpp
+// Config.h - 新しいパラメータ / New parameters
+
+// ============================================================================
+// タイミング設定（更新）/ Timing Settings (Updated)
+// ============================================================================
+const unsigned long MEASUREMENT_INTERVAL = 40;  // 40ms = 25Hz (was 100ms = 10Hz)
+const uint32_t SENSOR_TIMING_BUDGET = 20000;    // 20ms per sensor
+
+// ============================================================================
+// PID パラメータ / PID Parameters
+// ============================================================================
+// ステアリングPID / Steering PID
+const float STEERING_KP = 0.08;    // 比例ゲイン / Proportional gain
+const float STEERING_KI = 0.005;   // 積分ゲイン / Integral gain
+const float STEERING_KD = 0.02;    // 微分ゲイン / Derivative gain
+const float STEERING_INTEGRAL_MAX = 50.0;  // 積分上限 / Integral max
+
+// 目標壁距離（両壁検出時）/ Target wall distance (when both walls detected)
+const float TARGET_CENTER_OFFSET = 0.0;    // 中央からのオフセット / Offset from center (mm)
+
+// 左壁追従時の目標距離 / Target distance for left wall following
+const float TARGET_LEFT_DISTANCE = 400.0;  // 400mm = 40cm
+
+// ============================================================================
+// 速度制御パラメータ / Speed Control Parameters
+// ============================================================================
+const float SPEED_KP = 0.001;      // 速度PID比例ゲイン / Speed PID proportional gain
+const float MIN_SPEED_PULSE = 1.48;   // 最小速度 / Minimum speed (ms)
+const float MAX_SPEED_PULSE = 1.40;   // 最大速度 / Maximum speed (ms)
+const float CORNER_SPEED_PULSE = 1.47; // コーナー速度 / Corner speed (ms)
+```
+
+---
+
+## 新しい SteeringController / New SteeringController
+
+### SteeringController.h（更新版）/ SteeringController.h (Updated)
+
+```cpp
+// SteeringController.h
 #ifndef STEERING_CONTROLLER_H
 #define STEERING_CONTROLLER_H
 
 #include <Arduino.h>
 #include "Config.h"
-#include "OpennessCalculator.h"
+#include "WallDetector.h"
 #include "PIDController.h"
 
-// 前方宣言 / Forward declaration
-struct SensorData;
+// 制御モード / Control modes
+enum ControlMode {
+    MODE_BOTH_WALLS,    // 両壁検出 → 中央走行 / Both walls → center driving
+    MODE_LEFT_WALL,     // 左壁のみ → 左壁追従 / Left wall only → follow left
+    MODE_RIGHT_WALL,    // 右壁のみ → 右壁追従 / Right wall only → follow right
+    MODE_NO_WALLS       // 壁なし → 直進 / No walls → straight
+};
 
-/**
- * ステアリング制御クラス（開放度ベース）
- * Steering Controller (Openness-based)
- */
 class SteeringController {
 private:
-    OpennessCalculator opennessCalc;
-    PIDController pid;
-    
-    /**
-     * 緊急回避が必要か判定
-     * Check if emergency avoidance is needed
-     */
-    bool needsEmergencyAvoidance(uint16_t front_distance);
-    
-    /**
-     * 緊急回避時のステアリング計算
-     * Calculate steering for emergency avoidance
-     */
-    float calculateEmergencySteering(const OpennessData& openness);
+    PIDController centeringPID;     // 中央走行用PID / Centering PID
+    PIDController wallFollowPID;    // 壁追従用PID / Wall following PID
+    ControlMode currentMode;
+    ControlMode previousMode;
 
 public:
-    /**
-     * コンストラクタ
-     */
     SteeringController();
     
-    /**
-     * ステアリング角度を計算
-     * Calculate steering angle
-     * @param sensorData センサーデータ配列[5]
-     * @return ステアリング角度（度） / Steering angle in degrees
-     */
-    float calculate(const SensorData* sensorData);
+    // 初期化 / Initialize
+    void begin();
     
-    /**
-     * 状態リセット
-     * Reset state
-     */
+    // ステアリング角度を計算 / Calculate steering angle
+    float calculate(const WallDetection& walls, const SensorData* sensorData);
+    
+    // 現在のモードを取得 / Get current mode
+    ControlMode getMode() const { return currentMode; }
+    
+    // PIDをリセット / Reset PID
     void reset();
+    
+    // デバッグ情報 / Debug info
+    void printDebugInfo() const;
 };
 
 #endif // STEERING_CONTROLLER_H
 ```
 
----
-
-## Config.h への追加パラメータ / New Parameters for Config.h
+### SteeringController.cpp（更新版）/ SteeringController.cpp (Updated)
 
 ```cpp
-// ============================================================================
-// 開放度ベースPID制御パラメータ
-// Openness-based PID Control Parameters
-// ============================================================================
+// SteeringController.cpp
+#include "SteeringController.h"
+#include "Logger.h"
 
-// 開放度計算の重み / Openness calculation weights
-const float OPENNESS_WEIGHT_FAR = 0.5;   // 70°センサー重み
-const float OPENNESS_WEIGHT_NEAR = 0.5;  // 20°センサー重み
+SteeringController::SteeringController() {
+    currentMode = MODE_NO_WALLS;
+    previousMode = MODE_NO_WALLS;
+}
 
-// PIDゲイン / PID gains
-// 注: 初期値は実験で調整が必要
-// Note: Initial values need tuning through experiments
-const float OPENNESS_PID_KP = 0.02;      // 比例ゲイン
-const float OPENNESS_PID_KI = 0.0;       // 積分ゲイン（初期は0）
-const float OPENNESS_PID_KD = 0.0;       // 微分ゲイン（初期は0）
+void SteeringController::begin() {
+    // 中央走行PID初期化 / Initialize centering PID
+    centeringPID.begin(STEERING_KP, STEERING_KI, STEERING_KD);
+    centeringPID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    centeringPID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
+    centeringPID.setDeadband(10.0);  // 10mm不感帯 / 10mm deadband
+    
+    // 壁追従PID初期化 / Initialize wall following PID
+    wallFollowPID.begin(STEERING_KP * 1.2, STEERING_KI, STEERING_KD * 1.5);
+    wallFollowPID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    wallFollowPID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
+    wallFollowPID.setDeadband(5.0);
+}
 
-// PID制限値 / PID limits
-const float OPENNESS_PID_INTEGRAL_LIMIT = 500.0;  // 積分上限
+float SteeringController::calculate(const WallDetection& walls, const SensorData* sensorData) {
+    float steering_angle = 0.0;
+    
+    // モード判定 / Mode determination
+    previousMode = currentMode;
+    
+    if (walls.left_valid && walls.right_valid) {
+        currentMode = MODE_BOTH_WALLS;
+    } else if (walls.left_valid) {
+        currentMode = MODE_LEFT_WALL;
+    } else if (walls.right_valid) {
+        currentMode = MODE_RIGHT_WALL;
+    } else {
+        currentMode = MODE_NO_WALLS;
+    }
+    
+    // モード変更時にPIDをリセット / Reset PID on mode change
+    if (currentMode != previousMode) {
+        centeringPID.reset();
+        wallFollowPID.reset();
+    }
+    
+    // モードに応じた制御 / Mode-specific control
+    switch (currentMode) {
+        case MODE_BOTH_WALLS: {
+            // 目標: 左右壁の中央 / Target: center between walls
+            // 誤差 = 右壁距離 - 左壁距離（正なら左寄り）
+            // Error = right_distance - left_distance (positive = too left)
+            float error = walls.right_distance - walls.left_distance;
+            float setpoint = TARGET_CENTER_OFFSET;  // 通常は0 / Usually 0
+            steering_angle = centeringPID.compute(setpoint, -error);
+            break;
+        }
+        
+        case MODE_LEFT_WALL: {
+            // 目標: 左壁から一定距離 / Target: fixed distance from left wall
+            float measured = walls.left_distance;
+            steering_angle = wallFollowPID.compute(TARGET_LEFT_DISTANCE, measured);
+            
+            // 壁角度による補正も加える / Also add wall angle correction
+            steering_angle += walls.left_angle * 0.5;
+            break;
+        }
+        
+        case MODE_RIGHT_WALL: {
+            // 目標: 右壁から一定距離 / Target: fixed distance from right wall
+            float measured = walls.right_distance;
+            steering_angle = -wallFollowPID.compute(TARGET_LEFT_DISTANCE, measured);
+            
+            // 壁角度による補正 / Wall angle correction
+            steering_angle -= walls.right_angle * 0.5;
+            break;
+        }
+        
+        case MODE_NO_WALLS:
+        default:
+            // 直進維持 / Maintain straight
+            steering_angle = 0.0;
+            break;
+    }
+    
+    // =========================================================================
+    // 安全制約: 左側センサーが近すぎる場合の緊急回避
+    // Safety constraint: Emergency avoidance if left sensors too close
+    // =========================================================================
+    if (sensorData != nullptr) {
+        uint16_t sensor0_dist = sensorData[0].valid ? sensorData[0].distance : 9999;
+        uint16_t sensor1_dist = sensorData[1].valid ? sensorData[1].distance : 9999;
+        uint16_t min_left_dist = min(sensor0_dist, sensor1_dist);
+        
+        if (min_left_dist < MIN_LEFT_DISTANCE) {
+            float shortage = MIN_LEFT_DISTANCE - min_left_dist;
+            steering_angle += shortage * LEFT_AVOID_GAIN;
+        }
+    }
+    
+    // 最大操舵角でクランプ / Clamp to max steering angle
+    steering_angle = constrain(steering_angle, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    
+    return steering_angle;
+}
 
-// 緊急回避パラメータ / Emergency avoidance parameters
-const uint16_t EMERGENCY_FRONT_THRESHOLD = 200;   // 前方緊急閾値(mm)
+void SteeringController::reset() {
+    centeringPID.reset();
+    wallFollowPID.reset();
+    currentMode = MODE_NO_WALLS;
+    previousMode = MODE_NO_WALLS;
+}
+
+void SteeringController::printDebugInfo() const {
+    Logger::print(" Mode:");
+    switch (currentMode) {
+        case MODE_BOTH_WALLS: Logger::print("BOTH"); break;
+        case MODE_LEFT_WALL:  Logger::print("LEFT"); break;
+        case MODE_RIGHT_WALL: Logger::print("RIGHT"); break;
+        case MODE_NO_WALLS:   Logger::print("NONE"); break;
+    }
+}
 ```
 
 ---
 
 ## 実装手順 / Implementation Steps
 
-### Step 1: PIDController クラス作成
+### Phase 1: PIDControllerクラスの追加 / Add PIDController Class
 
-```
-1. PIDController.h を作成
-2. PIDController.cpp を作成
-3. 単体テスト（シリアル出力で動作確認）
-```
+1. `PIDController.h` を作成 / Create `PIDController.h`
+2. `PIDController.cpp` を作成 / Create `PIDController.cpp`
+3. 単体テストを実施 / Run unit tests
 
-### Step 2: OpennessCalculator クラス作成
-
-```
-1. OpennessCalculator.h を作成
-2. OpennessCalculator.cpp を作成
-3. 単体テスト（センサー値を入れて開放度を出力）
-```
-
-### Step 3: Config.h 更新
-
-```
-1. 新パラメータを追加
-2. 既存パラメータは残す（互換性のため）
-```
-
-### Step 4: SteeringController 修正
-
-```
-1. 内部で OpennessCalculator と PIDController を使用するよう変更
-2. calculate() メソッドのロジック置き換え
-3. 緊急回避ロジックを追加
+```bash
+# ファイル構成 / File structure
+five_sensor_reader/
+├── Config.h              # 更新 / Update
+├── PIDController.h       # 新規 / New
+├── PIDController.cpp     # 新規 / New
+├── SteeringController.h  # 更新 / Update
+├── SteeringController.cpp # 更新 / Update
+├── SensorReader.h
+├── SensorReader.cpp      # 更新 / Update
+├── WallDetector.h
+├── WallDetector.cpp
+├── Actuator.h
+├── Actuator.cpp
+├── Logger.h
+└── five_sensor_reader.ino # 更新 / Update
 ```
 
-### Step 5: 統合テスト
+### Phase 2: センサー高速化 / Sensor Speed Optimization
 
-```
-1. DEBUG_MODE=true でセンサー値と計算結果を確認
-2. 開放度、error、ステアリング角度をシリアル出力
-3. 期待通りの値か確認
-```
+1. `SensorReader.cpp` の `begin()` に timing budget 設定を追加
+   Add timing budget setting to `SensorReader.cpp` `begin()`
+2. `Config.h` の `MEASUREMENT_INTERVAL` を 100ms → 40ms に変更
+   Change `MEASUREMENT_INTERVAL` from 100ms to 40ms in `Config.h`
+3. 動作確認（シリアル出力で制御周波数を確認）
+   Verify operation (check control frequency via serial output)
+
+### Phase 3: SteeringController の更新 / Update SteeringController
+
+1. PIDController を使用するように SteeringController を更新
+   Update SteeringController to use PIDController
+2. モード切替ロジックの実装
+   Implement mode switching logic
+3. デバッグ出力の追加
+   Add debug output
+
+### Phase 4: パラメータチューニング / Parameter Tuning
+
+1. P項のみでテスト（Ki=0, Kd=0）
+   Test with P term only (Ki=0, Kd=0)
+2. D項を追加してオーバーシュート抑制
+   Add D term to suppress overshoot
+3. I項を追加して定常偏差を解消
+   Add I term to eliminate steady-state error
+4. 各モードでのパラメータ調整
+   Adjust parameters for each mode
 
 ---
 
-## 設計上の制約 / Design Constraints
+## チューニングガイド / Tuning Guide
 
-### MUST（必須）
+### 推奨チューニング手順 / Recommended Tuning Procedure
 
-- [ ] オブジェクト指向で実装（クラスベース）
-- [ ] 1クラス = 1ファイルペア（.h / .cpp）
-- [ ] Config.h で全パラメータを一元管理
-- [ ] 既存の SensorData 構造体を流用
-- [ ] DEBUG_MODE 対応（シリアル出力切り替え）
+```
+1. Kp のみで開始 / Start with Kp only
+   - 振動が始まるまで Kp を増加 / Increase Kp until oscillation starts
+   - その値の 50-60% を使用 / Use 50-60% of that value
 
-### SHOULD（推奨）
+2. Kd を追加 / Add Kd
+   - オーバーシュートが減少するまで Kd を増加
+   - Increase Kd until overshoot decreases
+   - 応答が遅くなりすぎない程度に / Don't make response too slow
 
-- [ ] 既存コードとの互換性維持（段階的移行可能）
-- [ ] ログ出力は Logger クラス経由
-- [ ] マジックナンバー禁止（定数化）
+3. Ki を追加 / Add Ki
+   - 定常偏差がなくなるまで Ki を増加
+   - Increase Ki until steady-state error disappears
+   - ハンチングに注意 / Watch for hunting
+```
 
-### SHOULD NOT（避けるべき）
+### 初期パラメータ推奨値 / Recommended Initial Parameters
 
-- [ ] グローバル変数の使用
-- [ ] 複雑な継承関係
-- [ ] 過度な抽象化
+| パラメータ / Parameter | 初期値 / Initial | 調整範囲 / Range |
+|------------------------|------------------|------------------|
+| STEERING_KP | 0.08 | 0.03 - 0.15 |
+| STEERING_KI | 0.005 | 0.001 - 0.02 |
+| STEERING_KD | 0.02 | 0.005 - 0.05 |
+| MEASUREMENT_INTERVAL | 40ms | 20ms - 100ms |
 
 ---
 
-## テスト観点 / Test Considerations
+## テスト計画 / Test Plan
 
-### 単体テスト
+### 単体テスト / Unit Tests
 
-```cpp
-// PIDController テスト
-PIDController pid(0.02, 0.0, 0.0, 500.0, -30.0, 30.0);
-float output = pid.calculate(100.0);  // error=100 → output≈2.0
+1. **PIDController テスト**
+   - ステップ応答テスト / Step response test
+   - アンチワインドアップ動作確認 / Anti-windup verification
+   - 出力制限動作確認 / Output limiting verification
 
-// OpennessCalculator テスト
-OpennessCalculator calc(0.5, 0.5);
-uint16_t distances[5] = {300, 800, 1200, 600, 250};
-OpennessData data = calc.calculate(distances);
-// left_openness = 0.5*300 + 0.5*800 = 550
-// right_openness = 0.5*250 + 0.5*600 = 425
-// error = 425 - 550 = -125 → 左が開けてる
-```
+2. **センサー高速化テスト**
+   - 実際の制御周波数測定 / Actual control frequency measurement
+   - センサー読み取りエラー率 / Sensor read error rate
 
-### 統合テスト
+### 統合テスト / Integration Tests
 
-```
-シナリオ1: 左右均等
-  距離: [400, 800, 1000, 800, 400]
-  期待: error ≈ 0, steering ≈ 0°（直進）
+1. **直線走行テスト**
+   - 中央維持性能 / Center maintaining performance
+   - オーバーシュート量 / Overshoot amount
 
-シナリオ2: 左が開けてる
-  距離: [600, 1000, 1000, 500, 300]
-  期待: error < 0, steering < 0°（左へ）
+2. **カーブ走行テスト**
+   - 追従性能 / Tracking performance
+   - 遅延量 / Delay amount
 
-シナリオ3: 前方障害物
-  距離: [400, 600, 150, 800, 500]
-  期待: 緊急回避発動、右へ最大舵角
-```
+3. **速度変化テスト**
+   - 各速度での安定性 / Stability at each speed
 
 ---
 
 ## 注意事項 / Notes
 
-### チューニングについて
+### アンチワインドアップ / Anti-Windup
 
-```
-Kp = 0.02 は初期値。実機テストで以下を観察して調整：
-- 反応が鈍い → Kp を上げる
-- 振動する → Kp を下げる
-- 定常偏差が残る → Ki を少し入れる
-- 急変に弱い → Kd を少し入れる
+積分値の蓄積を制限して、急激な方向転換時の暴走を防止します。
+
+Limit integral accumulation to prevent runaway during rapid direction changes.
+
+```cpp
+// 積分値の制限 / Limit integral value
+state.integral = constrain(state.integral, config.integral_min, config.integral_max);
 ```
 
-### 既存コードとの関係
+### モード切替時のリセット / Reset on Mode Change
 
+制御モードが変わった時は、PID状態をリセットして不連続な出力を防止します。
+
+Reset PID state when control mode changes to prevent discontinuous output.
+
+```cpp
+if (currentMode != previousMode) {
+    centeringPID.reset();
+    wallFollowPID.reset();
+}
 ```
-WallDetector は当面残す（比較検証用）
-SteeringController の内部実装のみ変更
-外部インターフェース（calculate メソッド）は維持
-```
+
+### デバッグモードの活用 / Using Debug Mode
+
+実機テスト前に `DEBUG_MODE = true` で動作確認することを推奨します。
+
+Recommend verifying operation with `DEBUG_MODE = true` before real machine testing.
 
 ---
 
-## 参考：期待される挙動 / Expected Behavior
+## 参考資料 / References
 
-### 広いS字セクション
+- VL53L0X データシート / Datasheet
+- VL53L1X データシート / Datasheet  
+- プロジェクト「PID制御について」ドキュメント / Project "About PID Control" document
+- Arduino PID Library 設計パターン / Arduino PID Library design patterns
 
-```
-    ┌───┐     ┌───┐
-    │   └─────┘   │
-    │             │
-    │     🚗→    │  
-    │             │
+---
 
-センサー: 左右とも遠い
-→ left_openness ≈ right_openness
-→ error ≈ 0
-→ steering ≈ 0°
-→ 直進！（蛇行しない）
-```
+## 変更履歴 / Change Log
 
-### コーナー進入
-
-```
-壁壁壁壁壁壁壁
-              
-   🚗→   壁壁
-         壁壁
-
-センサー: 右前方(+20°)が近い
-→ right_openness 減少
-→ error < 0
-→ steering < 0°
-→ 左へステアリング
-```
+| 日付 / Date | 変更内容 / Changes |
+|-------------|-------------------|
+| 2024-XX-XX | 初版作成 / Initial creation |

@@ -50,47 +50,60 @@ public:
   // センサーデータのコンパクト表示
   static void printSensorData(uint8_t channel, uint16_t distance, bool valid) {
     #if DEBUG_MODE
-      Serial.print("Ch");
+      Serial.print("S");
       Serial.print(channel);
-      Serial.print(": ");
+      Serial.print(":");
       if (valid) {
         Serial.print(distance);
-        Serial.print("mm");
       } else {
-        Serial.print("Out of range");
+        Serial.print("---");
       }
     #endif
   }
 
-  // 開放度データの表示
-  static void printOpenness(float left, float right, float error) {
+  // 壁検出状態の表示
+  static void printWallStatus(bool left_valid, bool right_valid) {
     #if DEBUG_MODE
-      Serial.print(" | Open L:");
-      Serial.print(left, 0);
-      Serial.print(" R:");
-      Serial.print(right, 0);
-      Serial.print(" Err:");
-      Serial.print(error, 0);
+      Serial.print(" | W:");
+      Serial.print(left_valid ? "L" : "-");
+      Serial.print(right_valid ? "R" : "-");
+    #endif
+  }
+
+  // 壁までの距離の表示
+  static void printWallDistances(bool left_valid, float left_dist, bool right_valid, float right_dist) {
+    #if DEBUG_MODE
+      Serial.print(" D:");
+      if (left_valid) {
+        Serial.print((int)left_dist);
+      } else {
+        Serial.print("---");
+      }
+      Serial.print("/");
+      if (right_valid) {
+        Serial.print((int)right_dist);
+      } else {
+        Serial.print("---");
+      }
     #endif
   }
 
   // ステアリング角度の表示
   static void printSteering(float angle) {
     #if DEBUG_MODE
-      Serial.print(" | Steer:");
+      Serial.print(" St:");
       Serial.print(angle, 1);
-      Serial.print("deg");
     #endif
   }
 
   // アクチュエーター情報の表示
   static void printActuator(const char* name, uint16_t pulse_us) {
     #if DEBUG_MODE
-      Serial.print("  [");
+      Serial.print(" [");
       Serial.print(name);
-      Serial.print(": ");
+      Serial.print(":");
       Serial.print(pulse_us);
-      Serial.print("us]");
+      Serial.print("]");
     #endif
   }
 };

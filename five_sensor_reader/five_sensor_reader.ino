@@ -1,7 +1,7 @@
 /*
  * five_sensor_reader.ino
  *
- * 5つのVL53L0Xセンサーを使った開放度ベースPID制御システム
+ * 5つのVL53L0Xセンサーを使ったPID制御壁追従システム
  * オブジェクト指向設計版
  *
  * 接続:
@@ -24,6 +24,7 @@
 #include "Config.h"
 #include "Logger.h"
 #include "SensorReader.h"
+#include "WallDetector.h"
 #include "SteeringController.h"
 #include "Actuator.h"
 
@@ -31,6 +32,7 @@
 // グローバルオブジェクト
 // ============================================================================
 SensorReader sensorReader;
+WallDetector wallDetector;
 SteeringController steeringController;
 Actuator actuator;
 
@@ -42,10 +44,13 @@ void setup() {
   Logger::begin(9600);
 
   Logger::println("==========================================");
-  Logger::println("  Openness-based PID Control System");
+  Logger::println("  PID Wall Following Control System");
   Logger::println("==========================================");
   Logger::print("Debug Mode: ");
   Logger::println(DEBUG_MODE ? "ON (No PWM)" : "OFF (PWM Active)");
+  Logger::print("Control Frequency: ");
+  Logger::print(1000 / MEASUREMENT_INTERVAL);
+  Logger::println("Hz");
   Logger::println();
 
   // センサー初期化
@@ -53,6 +58,9 @@ void setup() {
     Logger::println("ERROR: Sensor initialization failed!");
     while (1) { delay(100); }  // 無限ループで停止
   }
+
+  // ステアリングコントローラー初期化
+  steeringController.begin();
 
   // アクチュエーター初期化
   actuator.begin();
@@ -72,7 +80,9 @@ void loop() {
   if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
     lastMeasurement = currentTime;
 
-    // フェーズ1: センサーデータ取得
+    // =========================================================================
+    // Phase 1: センサーデータ取得
+    // =========================================================================
     sensorReader.readAll();
     const SensorData* sensorData = sensorReader.getAllData();
 
@@ -84,30 +94,41 @@ void loop() {
         sensorData[i].valid
       );
       if (i < NUM_SENSORS - 1) {
-        Logger::print("  |  ");
+        Logger::print(" | ");
       }
     }
 
-    // フェーズ2: 緊急停止チェック（前方障害物検出）
+    // =========================================================================
+    // Phase 2: 緊急停止チェック（前方障害物検出）
+    // =========================================================================
     bool emergency_stop = false;
     if (sensorData[2].valid && sensorData[2].distance < EMERGENCY_FRONT_THRESHOLD) {
       emergency_stop = true;
-      Logger::print(" | EMERGENCY STOP! Front:");
-      Logger::print(sensorData[2].distance);
-      Logger::print("mm");
+      Logger::print(" | EMERGENCY!");
     }
 
-    // フェーズ3: ステアリング角度計算（開放度ベースPID）
-    float steering_angle = steeringController.calculate(sensorData);
+    // =========================================================================
+    // Phase 3: 壁検出
+    // =========================================================================
+    WallDetection walls = wallDetector.detect(sensorData);
 
-    // デバッグ: 開放度データ表示
-    const OpennessData& openness = steeringController.getLastOpennessData();
-    Logger::printOpenness(openness.left_openness, openness.right_openness, openness.error);
+    // デバッグ: 壁検出結果表示
+    Logger::printWallStatus(walls.left_valid, walls.right_valid);
+    Logger::printWallDistances(walls.left_valid, walls.left_distance,
+                               walls.right_valid, walls.right_distance);
 
-    // デバッグ: ステアリング表示
+    // =========================================================================
+    // Phase 4: ステアリング角度計算（PID制御）
+    // =========================================================================
+    float steering_angle = steeringController.calculate(walls, sensorData);
+
+    // デバッグ: モードとステアリング表示
+    steeringController.printDebugInfo();
     Logger::printSteering(steering_angle);
 
-    // フェーズ4: アクチュエーター制御
+    // =========================================================================
+    // Phase 5: アクチュエーター制御
+    // =========================================================================
     if (emergency_stop) {
       // 緊急停止：中央ステアリング + 停止
       actuator.setSteering(0.0);

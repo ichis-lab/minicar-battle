@@ -2,9 +2,7 @@
  * SteeringController.h
  *
  * ステアリング制御クラス（宣言）
- * 開放度ベースPID制御
- *
- * Steering Controller (Openness-based PID)
+ * PID制御による壁追従制御
  */
 
 #ifndef STEERING_CONTROLLER_H
@@ -12,61 +10,44 @@
 
 #include <Arduino.h>
 #include "Config.h"
-#include "OpennessCalculator.h"
+#include "WallDetector.h"
 #include "PIDController.h"
 
-// 前方宣言 / Forward declaration
+// 前方宣言
 struct SensorData;
 
-/**
- * ステアリング制御クラス（開放度ベース）
- * Steering Controller (Openness-based)
- */
+// 制御モード / Control modes
+enum ControlMode {
+    MODE_BOTH_WALLS,    // 両壁検出 → 中央走行 / Both walls → center driving
+    MODE_LEFT_WALL,     // 左壁のみ → 左壁追従 / Left wall only → follow left
+    MODE_RIGHT_WALL,    // 右壁のみ → 右壁追従 / Right wall only → follow right
+    MODE_NO_WALLS       // 壁なし → 直進 / No walls → straight
+};
+
 class SteeringController {
 private:
-    OpennessCalculator opennessCalc;
-    PIDController pid;
-
-    // 最後に計算した開放度データ（デバッグ用）
-    OpennessData lastOpennessData;
-
-    /**
-     * 緊急回避が必要か判定
-     * Check if emergency avoidance is needed
-     */
-    bool needsEmergencyAvoidance(uint16_t front_distance);
-
-    /**
-     * 緊急回避時のステアリング計算
-     * Calculate steering for emergency avoidance
-     */
-    float calculateEmergencySteering(const OpennessData& openness);
+    PIDController centeringPID;     // 中央走行用PID / Centering PID
+    PIDController wallFollowPID;    // 壁追従用PID / Wall following PID
+    ControlMode currentMode;
+    ControlMode previousMode;
 
 public:
-    /**
-     * コンストラクタ
-     */
     SteeringController();
 
-    /**
-     * ステアリング角度を計算
-     * Calculate steering angle
-     * @param sensorData センサーデータ配列[5]
-     * @return ステアリング角度（度） / Steering angle in degrees
-     */
-    float calculate(const SensorData* sensorData);
+    // 初期化 / Initialize
+    void begin();
 
-    /**
-     * 状態リセット
-     * Reset state
-     */
+    // ステアリング角度を計算 / Calculate steering angle
+    float calculate(const WallDetection& walls, const SensorData* sensorData);
+
+    // 現在のモードを取得 / Get current mode
+    ControlMode getMode() const { return currentMode; }
+
+    // PIDをリセット / Reset PID
     void reset();
 
-    /**
-     * 最後の開放度データを取得（デバッグ用）
-     * Get last openness data (for debugging)
-     */
-    const OpennessData& getLastOpennessData() const;
+    // デバッグ情報 / Debug info
+    void printDebugInfo() const;
 };
 
 #endif // STEERING_CONTROLLER_H
