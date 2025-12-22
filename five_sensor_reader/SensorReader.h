@@ -23,12 +23,12 @@ struct SensorData {
 // センサーリーダークラス
 class SensorReader {
 private:
-  Adafruit_VL53L0X sensors[NUM_SENSORS];
-  VL53L0X_RangingMeasurementData_t measurements[NUM_SENSORS];
-  SensorData sensorData[NUM_SENSORS];
+  Adafruit_VL53L0X _sensors[NUM_SENSORS];
+  VL53L0X_RangingMeasurementData_t _measurements[NUM_SENSORS];
+  SensorData _sensorData[NUM_SENSORS];
 
   // TCA9548Aのチャンネル選択
-  void selectChannel(uint8_t channel);
+  void _selectChannel(uint8_t channel);
 
 public:
   // コンストラクタ

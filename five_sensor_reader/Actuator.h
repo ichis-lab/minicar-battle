@@ -14,8 +14,8 @@
 
 class Actuator {
 private:
-  Servo steeringServo;
-  Servo escController;
+  Servo _steeringServo;
+  Servo _escController;
 
 public:
   // コンストラクタ

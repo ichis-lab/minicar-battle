@@ -23,10 +23,10 @@ enum ControlMode {
 
 class SteeringController {
 private:
-    PIDController centeringPID;     // 中央走行用PID（両壁モード：距離制御）
-    PIDController anglePID;         // 角度制御用PID（片壁モード：壁と平行維持）
-    ControlMode currentMode;
-    ControlMode previousMode;
+    PIDController _centeringPID;    // 中央走行用PID（両壁モード：距離制御）
+    PIDController _anglePID;        // 角度制御用PID（片壁モード：壁と平行維持）
+    ControlMode _currentMode;
+    ControlMode _previousMode;
 
 public:
     SteeringController();
@@ -38,7 +38,7 @@ public:
     float calculate(const WallDetection& walls);
 
     // 現在のモードを取得 / Get current mode
-    ControlMode getMode() const { return currentMode; }
+    ControlMode getMode() const { return _currentMode; }
 
     // PIDをリセット / Reset PID
     void reset();

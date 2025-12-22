@@ -27,12 +27,12 @@ struct WallDetection {
 class WallDetector {
 private:
     // センサーペアから壁の距離と角度を計算
-    bool calculateWall(uint16_t dist_far, uint16_t dist_near,
-                       float angle_far, float angle_near,
-                       float& out_distance, float& out_angle);
+    bool _calculateWall(uint16_t dist_far, uint16_t dist_near,
+                        float angle_far, float angle_near,
+                        float& out_distance, float& out_angle);
 
     // センサー値の妥当性チェック
-    bool isValidReading(uint16_t distance);
+    bool _isValidReading(uint16_t distance);
 
 public:
     WallDetector();

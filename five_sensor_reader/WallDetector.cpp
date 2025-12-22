@@ -17,15 +17,15 @@
 WallDetector::WallDetector() {
 }
 
-bool WallDetector::isValidReading(uint16_t distance) {
+bool WallDetector::_isValidReading(uint16_t distance) {
     return (distance >= MIN_VALID_DISTANCE && distance <= RELIABLE_RANGE);
 }
 
-bool WallDetector::calculateWall(uint16_t dist_far, uint16_t dist_near,
-                                  float angle_far, float angle_near,
-                                  float& out_distance, float& out_angle) {
+bool WallDetector::_calculateWall(uint16_t dist_far, uint16_t dist_near,
+                                   float angle_far, float angle_near,
+                                   float& out_distance, float& out_angle) {
     // 両方のセンサーが有効でなければ失敗
-    if (!isValidReading(dist_far) || !isValidReading(dist_near)) {
+    if (!_isValidReading(dist_far) || !_isValidReading(dist_near)) {
         return false;
     }
 
@@ -105,14 +105,14 @@ WallDetection WallDetector::detect(const SensorData* sensorData) {
     // Index 4: +70° (右側方)
 
     // 左壁の検出（センサー0と1を使用）
-    result.left_valid = calculateWall(
+    result.left_valid = _calculateWall(
         sensorData[0].distance, sensorData[1].distance,
         SENSOR_ANGLES[0], SENSOR_ANGLES[1],
         result.left_distance, result.left_angle
     );
 
     // 右壁の検出（センサー4と3を使用）
-    result.right_valid = calculateWall(
+    result.right_valid = _calculateWall(
         sensorData[4].distance, sensorData[3].distance,
         SENSOR_ANGLES[4], SENSOR_ANGLES[3],
         result.right_distance, result.right_angle

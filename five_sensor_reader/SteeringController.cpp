@@ -14,8 +14,8 @@
 #include "Logger.h"
 
 SteeringController::SteeringController() {
-    currentMode = MODE_NO_WALLS;
-    previousMode = MODE_NO_WALLS;
+    _currentMode = MODE_NO_WALLS;
+    _previousMode = MODE_NO_WALLS;
 }
 
 void SteeringController::begin() {
@@ -23,45 +23,45 @@ void SteeringController::begin() {
     // 中央走行PID初期化（両壁モード：距離制御）
     // 目標: 左右壁からの距離差 = 0
     // =========================================================================
-    centeringPID.begin(STEERING_KP, STEERING_KI, STEERING_KD);
-    centeringPID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
-    centeringPID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
-    centeringPID.setDeadband(10.0);  // 10mm不感帯
+    _centeringPID.begin(STEERING_KP, STEERING_KI, STEERING_KD);
+    _centeringPID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    _centeringPID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
+    _centeringPID.setDeadband(10.0);  // 10mm不感帯
 
     // =========================================================================
     // 角度PID初期化（片壁モード：角度制御）
     // 目標: 壁角度 = 0°（壁と平行）
     // =========================================================================
-    anglePID.begin(ANGLE_KP, ANGLE_KI, ANGLE_KD);
-    anglePID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
-    anglePID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
-    anglePID.setDeadband(1.0);  // 1°不感帯
+    _anglePID.begin(ANGLE_KP, ANGLE_KI, ANGLE_KD);
+    _anglePID.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    _anglePID.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
+    _anglePID.setDeadband(1.0);  // 1°不感帯
 }
 
 float SteeringController::calculate(const WallDetection& walls) {
     float steering_angle = 0.0;
 
     // モード判定
-    previousMode = currentMode;
+    _previousMode = _currentMode;
 
     if (walls.left_valid && walls.right_valid) {
-        currentMode = MODE_BOTH_WALLS;
+        _currentMode = MODE_BOTH_WALLS;
     } else if (walls.left_valid) {
-        currentMode = MODE_LEFT_WALL;
+        _currentMode = MODE_LEFT_WALL;
     } else if (walls.right_valid) {
-        currentMode = MODE_RIGHT_WALL;
+        _currentMode = MODE_RIGHT_WALL;
     } else {
-        currentMode = MODE_NO_WALLS;
+        _currentMode = MODE_NO_WALLS;
     }
 
     // モード変更時にPIDをリセット
-    if (currentMode != previousMode) {
-        centeringPID.reset();
-        anglePID.reset();
+    if (_currentMode != _previousMode) {
+        _centeringPID.reset();
+        _anglePID.reset();
     }
 
     // モードに応じた制御
-    switch (currentMode) {
+    switch (_currentMode) {
         case MODE_BOTH_WALLS: {
             // =================================================================
             // 両壁モード: 距離PIDで中央を維持
@@ -70,7 +70,7 @@ float SteeringController::calculate(const WallDetection& walls) {
             // =================================================================
             float error = walls.right_distance - walls.left_distance;
             float setpoint = TARGET_CENTER_OFFSET;  // 通常は0
-            steering_angle = centeringPID.compute(setpoint, -error);
+            steering_angle = _centeringPID.compute(setpoint, -error);
             break;
         }
 
@@ -81,7 +81,7 @@ float SteeringController::calculate(const WallDetection& walls) {
             // 壁角度 > 0: 壁に向かっている → 右へステア（正）
             // 壁角度 < 0: 壁から離れている → 左へステア（負）
             // =================================================================
-            steering_angle = anglePID.compute(0.0, walls.left_angle);
+            steering_angle = _anglePID.compute(0.0, walls.left_angle);
 
             // 安全距離制約: 壁に近すぎる場合は離れる方向に補正
             if (walls.left_distance < MIN_SAFE_DISTANCE) {
@@ -98,7 +98,7 @@ float SteeringController::calculate(const WallDetection& walls) {
             // 壁角度 > 0: 壁に向かっている → 左へステア（負）
             // 壁角度 < 0: 壁から離れている → 右へステア（正）
             // =================================================================
-            steering_angle = -anglePID.compute(0.0, walls.right_angle);
+            steering_angle = -_anglePID.compute(0.0, walls.right_angle);
 
             // 安全距離制約: 壁に近すぎる場合は離れる方向に補正
             if (walls.right_distance < MIN_SAFE_DISTANCE) {
@@ -124,15 +124,15 @@ float SteeringController::calculate(const WallDetection& walls) {
 }
 
 void SteeringController::reset() {
-    centeringPID.reset();
-    anglePID.reset();
-    currentMode = MODE_NO_WALLS;
-    previousMode = MODE_NO_WALLS;
+    _centeringPID.reset();
+    _anglePID.reset();
+    _currentMode = MODE_NO_WALLS;
+    _previousMode = MODE_NO_WALLS;
 }
 
 void SteeringController::printDebugInfo() const {
     Logger::print(" Mode:");
-    switch (currentMode) {
+    switch (_currentMode) {
         case MODE_BOTH_WALLS: Logger::print("BOTH"); break;
         case MODE_LEFT_WALL:  Logger::print("LEFT"); break;
         case MODE_RIGHT_WALL: Logger::print("RIGHT"); break;

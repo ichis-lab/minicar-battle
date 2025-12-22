@@ -10,13 +10,13 @@
 SensorReader::SensorReader() {
   // 初期化
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-    sensorData[i].distance = 0;
-    sensorData[i].valid = false;
-    sensorData[i].status = 255;
+    _sensorData[i].distance = 0;
+    _sensorData[i].valid = false;
+    _sensorData[i].status = 255;
   }
 }
 
-void SensorReader::selectChannel(uint8_t channel) {
+void SensorReader::_selectChannel(uint8_t channel) {
   if (channel > 7) return;
 
   Wire.beginTransmission(TCA9548A_ADDR);
@@ -31,7 +31,7 @@ bool SensorReader::begin() {
 
   // 各センサーを初期化
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-    selectChannel(SENSOR_CHANNELS[i]);
+    _selectChannel(SENSOR_CHANNELS[i]);
     delay(10);  // チャンネル切替後の安定待ち
 
     Logger::print("Sensor ");
@@ -42,7 +42,7 @@ bool SensorReader::begin() {
     Logger::print(SENSOR_ANGLES[i]);
     Logger::print("deg)...");
 
-    if (!sensors[i].begin()) {
+    if (!_sensors[i].begin()) {
       Logger::println(" FAILED!");
       return false;
     }
@@ -56,29 +56,29 @@ bool SensorReader::begin() {
 
 void SensorReader::readAll() {
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-    selectChannel(SENSOR_CHANNELS[i]);
-    sensors[i].rangingTest(&measurements[i], false);
+    _selectChannel(SENSOR_CHANNELS[i]);
+    _sensors[i].rangingTest(&_measurements[i], false);
 
-    sensorData[i].status = measurements[i].RangeStatus;
+    _sensorData[i].status = _measurements[i].RangeStatus;
 
-    if (measurements[i].RangeStatus != 4) {
-      sensorData[i].distance = measurements[i].RangeMilliMeter;
-      sensorData[i].valid = true;
+    if (_measurements[i].RangeStatus != 4) {
+      _sensorData[i].distance = _measurements[i].RangeMilliMeter;
+      _sensorData[i].valid = true;
     } else {
-      sensorData[i].distance = 0;
-      sensorData[i].valid = false;
+      _sensorData[i].distance = 0;
+      _sensorData[i].valid = false;
     }
   }
 }
 
 SensorData SensorReader::getSensorData(uint8_t index) const {
   if (index < NUM_SENSORS) {
-    return sensorData[index];
+    return _sensorData[index];
   }
   SensorData empty = {0, false, 255};
   return empty;
 }
 
 const SensorData* SensorReader::getAllData() const {
-  return sensorData;
+  return _sensorData;
 }

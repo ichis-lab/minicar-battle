@@ -37,10 +37,10 @@ struct PIDConfig {
 
 class PIDController {
 private:
-    PIDGains gains;
-    PIDState state;
-    PIDConfig config;
-    bool first_run;
+    PIDGains _gains;
+    PIDState _state;
+    PIDConfig _config;
+    bool _firstRun;
 
 public:
     PIDController();

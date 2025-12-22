@@ -13,12 +13,12 @@ Actuator::Actuator() {
 
 void Actuator::begin() {
   #if !DEBUG_MODE
-    steeringServo.attach(SERVO_PIN);
-    escController.attach(ESC_PIN);
+    _steeringServo.attach(SERVO_PIN);
+    _escController.attach(ESC_PIN);
 
     // 初期位置に設定
-    steeringServo.writeMicroseconds(SERVO_CENTER);
-    escController.writeMicroseconds((uint16_t)(STOP_SPEED_PULSE * 1000));
+    _steeringServo.writeMicroseconds(SERVO_CENTER);
+    _escController.writeMicroseconds((uint16_t)(STOP_SPEED_PULSE * 1000));
 
     Logger::println("Actuators initialized:");
     Logger::print("  Servo: Pin ");
@@ -41,7 +41,7 @@ void Actuator::setSteering(float angle_degrees) {
 
   // PWM出力
   #if !DEBUG_MODE
-    steeringServo.writeMicroseconds(pulse_us);
+    _steeringServo.writeMicroseconds(pulse_us);
   #endif
 
   Logger::printActuator("Servo", pulse_us);
@@ -57,7 +57,7 @@ void Actuator::setSpeed(float speed_pulse_ms) {
 
   // PWM出力
   #if !DEBUG_MODE
-    escController.writeMicroseconds(pulse_us);
+    _escController.writeMicroseconds(pulse_us);
   #endif
 
   Logger::printActuator("ESC", pulse_us);
