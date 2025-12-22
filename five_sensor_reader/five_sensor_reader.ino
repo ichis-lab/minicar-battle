@@ -76,9 +76,9 @@ void loop() {
   static unsigned long lastMeasurement = 0;
   unsigned long currentTime = millis();
 
-  // 指定した間隔で測定・制御
+  // 指定した間隔で測定・制御（固定周期を維持）
   if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
-    lastMeasurement = currentTime;
+    lastMeasurement += MEASUREMENT_INTERVAL;
 
     // =========================================================================
     // Phase 1: センサーデータ取得
