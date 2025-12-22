@@ -62,33 +62,15 @@ public:
     #endif
   }
 
-  // 壁検出状態の表示
-  static void printWallStatus(bool left_valid, bool right_valid) {
+  // 開放度データの表示
+  static void printOpenness(float left, float right, float error) {
     #if DEBUG_MODE
-      Serial.print(" | L:");
-      Serial.print(left_valid ? "OK" : "NG");
+      Serial.print(" | Open L:");
+      Serial.print(left, 0);
       Serial.print(" R:");
-      Serial.print(right_valid ? "OK" : "NG");
-    #endif
-  }
-
-  // 壁までの距離の表示
-  static void printWallDistances(bool left_valid, float left_dist, bool right_valid, float right_dist) {
-    #if DEBUG_MODE
-      Serial.print(" | Dist L:");
-      if (left_valid) {
-        Serial.print(left_dist, 0);
-        Serial.print("mm");
-      } else {
-        Serial.print("--");
-      }
-      Serial.print(" R:");
-      if (right_valid) {
-        Serial.print(right_dist, 0);
-        Serial.print("mm");
-      } else {
-        Serial.print("--");
-      }
+      Serial.print(right, 0);
+      Serial.print(" Err:");
+      Serial.print(error, 0);
     #endif
   }
 

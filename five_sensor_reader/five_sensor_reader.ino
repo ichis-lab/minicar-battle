@@ -1,7 +1,7 @@
 /*
  * five_sensor_reader.ino
  *
- * 5つのVL53L0Xセンサーを使った壁追従制御システム
+ * 5つのVL53L0Xセンサーを使った開放度ベースPID制御システム
  * オブジェクト指向設計版
  *
  * 接続:
@@ -24,7 +24,6 @@
 #include "Config.h"
 #include "Logger.h"
 #include "SensorReader.h"
-#include "WallDetector.h"
 #include "SteeringController.h"
 #include "Actuator.h"
 
@@ -32,7 +31,6 @@
 // グローバルオブジェクト
 // ============================================================================
 SensorReader sensorReader;
-WallDetector wallDetector;
 SteeringController steeringController;
 Actuator actuator;
 
@@ -44,7 +42,7 @@ void setup() {
   Logger::begin(9600);
 
   Logger::println("==========================================");
-  Logger::println("  5-Sensor Wall Following System (OOP)");
+  Logger::println("  Openness-based PID Control System");
   Logger::println("==========================================");
   Logger::print("Debug Mode: ");
   Logger::println(DEBUG_MODE ? "ON (No PWM)" : "OFF (PWM Active)");
@@ -92,26 +90,24 @@ void loop() {
 
     // フェーズ2: 緊急停止チェック（前方障害物検出）
     bool emergency_stop = false;
-    if (sensorData[2].valid && sensorData[2].distance < EMERGENCY_STOP_DISTANCE) {
+    if (sensorData[2].valid && sensorData[2].distance < EMERGENCY_FRONT_THRESHOLD) {
       emergency_stop = true;
       Logger::print(" | EMERGENCY STOP! Front:");
       Logger::print(sensorData[2].distance);
       Logger::print("mm");
     }
 
-    // フェーズ3: 壁検出
-    WallDetection walls = wallDetector.detect(sensorData);
+    // フェーズ3: ステアリング角度計算（開放度ベースPID）
+    float steering_angle = steeringController.calculate(sensorData);
 
-    // フェーズ4: ステアリング角度計算（制約付き）
-    float steering_angle = steeringController.calculate(walls, sensorData);
+    // デバッグ: 開放度データ表示
+    const OpennessData& openness = steeringController.getLastOpennessData();
+    Logger::printOpenness(openness.left_openness, openness.right_openness, openness.error);
 
-    // デバッグ: 壁検出、距離、ステアリング表示
-    Logger::printWallStatus(walls.left_valid, walls.right_valid);
-    Logger::printWallDistances(walls.left_valid, walls.left_distance,
-                               walls.right_valid, walls.right_distance);
+    // デバッグ: ステアリング表示
     Logger::printSteering(steering_angle);
 
-    // フェーズ5: アクチュエーター制御
+    // フェーズ4: アクチュエーター制御
     if (emergency_stop) {
       // 緊急停止：中央ステアリング + 停止
       actuator.setSteering(0.0);

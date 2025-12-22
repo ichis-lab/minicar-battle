@@ -2,79 +2,94 @@
  * SteeringController.cpp
  *
  * ステアリング制御クラス（実装）
- * 幾何学ベース：壁の角度から直接ステアリング角度を決定
- * + 左側センサーの最小距離制約（35cm以上）
+ * 開放度ベースPID制御
+ *
+ * 左右の開放度バランスを制御目標とし、
+ * 広いセクションでの不要な蛇行を防ぐ
  */
 
 #include "SteeringController.h"
 #include "SensorReader.h"
 
-SteeringController::SteeringController() {
-  lastSensorData = nullptr;
+SteeringController::SteeringController()
+    : opennessCalc(OPENNESS_WEIGHT_FAR, OPENNESS_WEIGHT_NEAR),
+      pid(OPENNESS_PID_KP, OPENNESS_PID_KI, OPENNESS_PID_KD,
+          OPENNESS_PID_INTEGRAL_LIMIT, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE) {
+    // 開放度データの初期化
+    lastOpennessData.left_openness = 0.0;
+    lastOpennessData.right_openness = 0.0;
+    lastOpennessData.error = 0.0;
+    lastOpennessData.valid = false;
 }
 
-float SteeringController::calculate(const WallDetection& walls, const SensorData* sensorData) {
-  float steering_angle = 0.0;
+bool SteeringController::needsEmergencyAvoidance(uint16_t front_distance) {
+    return (front_distance < EMERGENCY_FRONT_THRESHOLD);
+}
 
-  // =========================================================================
-  // 基本ステアリング角度の計算（中央走行制御）
-  // =========================================================================
-  if (walls.left_valid && walls.right_valid) {
-    // 状態1: 両壁検出 → 左右の中央を走る（シンプル）
-
-    // 距離差から中央へ向かう補正のみ
-    // distance_diff > 0: 右壁が遠い（左に寄っている）→ 右に曲がる（正の角度）
-    // distance_diff < 0: 左壁が遠い（右に寄っている）→ 左に曲がる（負の角度）
-    float distance_diff = walls.right_distance - walls.left_distance;
-    steering_angle = distance_diff * CENTERING_GAIN;
-
-    // 壁角度補正は削除（予測可能性と安定性を優先）
-  }
-  else if (walls.left_valid && !walls.right_valid) {
-    // 状態2: 左壁のみ（分岐や開けた場所）→ 左壁に沿う（左優先）
-    steering_angle = walls.left_angle;
-  }
-  else if (!walls.left_valid && walls.right_valid) {
-    // 状態3: 右壁のみ → 右壁に沿う
-    steering_angle = -walls.right_angle;
-  }
-  else {
-    // 状態4: 壁なし → 直進
-    steering_angle = 0.0;
-  }
-
-  // =========================================================================
-  // 制約: 左側センサー（センサー0, 1）が50cm以上になるように補正
-  // =========================================================================
-  if (sensorData != nullptr) {
-    // センサー0（-70°）とセンサー1（-20°）の距離を取得
-    uint16_t sensor0_dist = sensorData[0].valid ? sensorData[0].distance : 9999;
-    uint16_t sensor1_dist = sensorData[1].valid ? sensorData[1].distance : 9999;
-
-    // 左側センサーのうち、近い方の距離
-    uint16_t min_left_dist = min(sensor0_dist, sensor1_dist);
-
-    // 左側が近すぎる場合、右に曲がる補正を追加
-    if (min_left_dist < MIN_LEFT_DISTANCE) {
-      // 距離が近いほど強く補正
-      // 例: 300mm → 50mm不足 → +2.5度の補正
-      // 例: 200mm → 150mm不足 → +7.5度の補正
-      float shortage = MIN_LEFT_DISTANCE - min_left_dist;
-      float correction = shortage * LEFT_AVOID_GAIN;
-
-      // 右方向に補正（正の角度）
-      steering_angle += correction;
+float SteeringController::calculateEmergencySteering(const OpennessData& openness) {
+    // 緊急回避: 開放度が大きい方へ最大舵角で回避
+    if (openness.left_openness > openness.right_openness) {
+        // 左が開けている → 左へ最大舵角
+        return -MAX_STEERING_ANGLE;
+    } else {
+        // 右が開けている（または同等）→ 右へ最大舵角
+        return MAX_STEERING_ANGLE;
     }
-  }
+}
 
-  // =========================================================================
-  // 最大操舵角でクランプ
-  // =========================================================================
-  if (steering_angle > MAX_STEERING_ANGLE) {
-    steering_angle = MAX_STEERING_ANGLE;
-  } else if (steering_angle < -MAX_STEERING_ANGLE) {
-    steering_angle = -MAX_STEERING_ANGLE;
-  }
+float SteeringController::calculate(const SensorData* sensorData) {
+    if (sensorData == nullptr) {
+        return 0.0;
+    }
 
-  return steering_angle;
+    // センサーデータから距離配列を作成
+    uint16_t distances[5];
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+        distances[i] = sensorData[i].valid ? sensorData[i].distance : SENSOR_ERROR_VALUE;
+    }
+
+    // 開放度を計算
+    lastOpennessData = opennessCalc.calculate(distances);
+
+    // 前方距離を取得（センサー2が前方）
+    uint16_t front_distance = distances[2];
+
+    float steering_angle = 0.0;
+
+    // =========================================================================
+    // 緊急回避チェック
+    // =========================================================================
+    if (sensorData[2].valid && needsEmergencyAvoidance(front_distance)) {
+        // 緊急回避モード
+        steering_angle = calculateEmergencySteering(lastOpennessData);
+    }
+    // =========================================================================
+    // 通常制御：開放度ベースPID
+    // =========================================================================
+    else if (lastOpennessData.valid) {
+        // PID制御で開放度の偏差を補正
+        // error > 0: 右が開けている → 右へ（正のステアリング）
+        // error < 0: 左が開けている → 左へ（負のステアリング）
+        steering_angle = pid.calculate(lastOpennessData.error);
+    }
+    // =========================================================================
+    // フォールバック：センサー無効時は直進
+    // =========================================================================
+    else {
+        steering_angle = 0.0;
+    }
+
+    return steering_angle;
+}
+
+void SteeringController::reset() {
+    pid.reset();
+    lastOpennessData.left_openness = 0.0;
+    lastOpennessData.right_openness = 0.0;
+    lastOpennessData.error = 0.0;
+    lastOpennessData.valid = false;
+}
+
+const OpennessData& SteeringController::getLastOpennessData() const {
+    return lastOpennessData;
 }
