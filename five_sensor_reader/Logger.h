@@ -32,6 +32,13 @@ public:
     #endif
   }
 
+  // float出力（小数点以下桁数指定）
+  static void print(float value, int decimals) {
+    #if DEBUG_MODE
+      Serial.print(value, decimals);
+    #endif
+  }
+
   // 汎用プリント（改行あり）
   template<typename T>
   static void println(const T& value) {

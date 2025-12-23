@@ -2,6 +2,7 @@
  * SensorReader.cpp
  *
  * センサー読み取りクラス（実装）
+ * VL53L1X対応版
  */
 
 #include "SensorReader.h"
@@ -13,6 +14,8 @@ SensorReader::SensorReader() {
     _sensorData[i].distance = 0;
     _sensorData[i].valid = false;
     _sensorData[i].status = 255;
+    _sensorData[i].peak_signal_mcps = 0.0;
+    _sensorData[i].ambient_mcps = 0.0;
   }
 }
 
@@ -26,8 +29,9 @@ void SensorReader::_selectChannel(uint8_t channel) {
 
 bool SensorReader::begin() {
   Wire.begin();
+  Wire.setClock(400000);  // I2C高速モード（400kHz）
 
-  Logger::println("=== Sensor Initialization ===");
+  Logger::println("=== VL53L1X Sensor Initialization ===");
 
   // 各センサーを初期化
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
@@ -42,32 +46,42 @@ bool SensorReader::begin() {
     Logger::print(SENSOR_ANGLES[i]);
     Logger::print("deg)...");
 
-    if (!_sensors[i].begin()) {
+    _sensors[i].setTimeout(500);
+    if (!_sensors[i].init()) {
       Logger::println(" FAILED!");
       return false;
     }
 
+    // VL53L1X設定: 長距離モード、測定時間50ms
+    _sensors[i].setDistanceMode(VL53L1X::Long);
+    _sensors[i].setMeasurementTimingBudget(L1X_TIMING_BUDGET_US);
+
+    // 連続測定モード開始
+    _sensors[i].startContinuous(L1X_INTER_MEASUREMENT_MS);
+
     Logger::println(" OK");
   }
 
-  Logger::println("=== All sensors initialized ===");
+  Logger::println("=== All VL53L1X sensors initialized ===");
   return true;
 }
 
 void SensorReader::readAll() {
   for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
     _selectChannel(SENSOR_CHANNELS[i]);
-    _sensors[i].rangingTest(&_measurements[i], false);
 
-    _sensorData[i].status = _measurements[i].RangeStatus;
+    // VL53L1Xから読み取り（連続測定モード）
+    _sensors[i].read();
 
-    if (_measurements[i].RangeStatus != 4) {
-      _sensorData[i].distance = _measurements[i].RangeMilliMeter;
-      _sensorData[i].valid = true;
-    } else {
-      _sensorData[i].distance = 0;
-      _sensorData[i].valid = false;
-    }
+    // 詳細データを取得
+    _sensorData[i].distance = _sensors[i].ranging_data.range_mm;
+    _sensorData[i].status = _sensors[i].ranging_data.range_status;
+    _sensorData[i].peak_signal_mcps = _sensors[i].ranging_data.peak_signal_count_rate_MCPS;
+    _sensorData[i].ambient_mcps = _sensors[i].ranging_data.ambient_count_rate_MCPS;
+
+    // ステータスが "range valid" (0) なら有効
+    // VL53L1X::rangeStatusToString() で確認可能
+    _sensorData[i].valid = (_sensorData[i].status == 0);
   }
 }
 
@@ -75,7 +89,7 @@ SensorData SensorReader::getSensorData(uint8_t index) const {
   if (index < NUM_SENSORS) {
     return _sensorData[index];
   }
-  SensorData empty = {0, false, 255};
+  SensorData empty = {0, false, 255, 0.0, 0.0};
   return empty;
 }
 

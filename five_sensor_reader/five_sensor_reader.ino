@@ -1,56 +1,42 @@
 /*
  * five_sensor_reader.ino
  *
- * 5つのVL53L0Xセンサーを使ったPID制御壁追従システム
- * オブジェクト指向設計版
+ * 5つのVL53L1Xセンサー測定テスト
+ * 制御ロジックなし、センサー読み取りと詳細データ表示のみ
  *
  * 接続:
  * - TCA9548A I2Cマルチプレクサ (アドレス: 0x70)
- * - VL53L0Xセンサー → マルチプレクサのチャンネル0-4に接続
- * - サーボモーター → Pin 9
- * - ESC → Pin 10
+ * - VL53L1Xセンサー → マルチプレクサのチャンネル0-4に接続
  *
- * 使用方法:
- * 1. Arduino IDEでこのファイルを開く
- * 2. 必要なライブラリをインストール:
- *    - Adafruit_VL53L0X
- *    - Servo (Arduino標準ライブラリ)
- * 3. Config.hでDEBUG_MODEを設定
- *    - true: デバッグ（PWMなし、シリアル出力あり）
- *    - false: 実機（PWMあり、シリアル出力なし）
- * 4. Arduino Nano R4に書き込み
+ * 必要なライブラリ:
+ * - VL53L1X (Pololu) - https://github.com/pololu/vl53l1x-arduino
  */
 
 #include "Config.h"
 #include "Logger.h"
 #include "SensorReader.h"
-#include "WallDetector.h"
-#include "SteeringController.h"
-#include "Actuator.h"
 
 // ============================================================================
 // グローバルオブジェクト
 // ============================================================================
 SensorReader sensorReader;
-WallDetector wallDetector;
-SteeringController steeringController;
-Actuator actuator;
 
 // ============================================================================
 // Setup関数
 // ============================================================================
 void setup() {
-  // ロガー初期化
-  Logger::begin(9600);
+  // ロガー初期化（115200bpsで詳細データ表示に対応）
+  Logger::begin(115200);
 
   Logger::println("==========================================");
-  Logger::println("  PID Wall Following Control System");
+  Logger::println("  VL53L1X 5-Sensor Test");
   Logger::println("==========================================");
-  Logger::print("Debug Mode: ");
-  Logger::println(DEBUG_MODE ? "ON (No PWM)" : "OFF (PWM Active)");
-  Logger::print("Control Frequency: ");
-  Logger::print(1000 / MEASUREMENT_INTERVAL);
-  Logger::println("Hz");
+  Logger::print("Measurement Interval: ");
+  Logger::print(MEASUREMENT_INTERVAL);
+  Logger::println("ms");
+  Logger::print("L1X Timing Budget: ");
+  Logger::print(L1X_TIMING_BUDGET_US / 1000);
+  Logger::println("ms");
   Logger::println();
 
   // センサー初期化
@@ -59,14 +45,13 @@ void setup() {
     while (1) { delay(100); }  // 無限ループで停止
   }
 
-  // ステアリングコントローラー初期化
-  steeringController.begin();
-
-  // アクチュエーター初期化
-  actuator.begin();
-
-  Logger::println("System ready!");
   Logger::println();
+  Logger::println("System ready! Starting measurements...");
+  Logger::println();
+
+  // ヘッダー表示
+  Logger::println("S0(-70) | S1(-20) | S2(0) | S3(+20) | S4(+70)");
+  Logger::println("--------|---------|-------|---------|--------");
 }
 
 // ============================================================================
@@ -76,69 +61,48 @@ void loop() {
   static unsigned long lastMeasurement = 0;
   unsigned long currentTime = millis();
 
-  // 指定した間隔で測定・制御（固定周期を維持）
+  // 指定した間隔で測定
   if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
     lastMeasurement += MEASUREMENT_INTERVAL;
 
     // =========================================================================
-    // Phase 1: センサーデータ取得
+    // センサーデータ取得
     // =========================================================================
     sensorReader.readAll();
     const SensorData* sensorData = sensorReader.getAllData();
 
-    // デバッグ: センサーデータ表示
+    // =========================================================================
+    // 詳細データ表示
+    // =========================================================================
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
-      Logger::printSensorData(
-        SENSOR_CHANNELS[i],
-        sensorData[i].distance,
-        sensorData[i].valid
-      );
+      // 距離とステータス
+      if (sensorData[i].valid) {
+        Logger::print(sensorData[i].distance);
+        Logger::print("mm");
+      } else {
+        Logger::print("---");
+      }
+      Logger::print("(");
+      Logger::print(sensorData[i].status);
+      Logger::print(")");
+
       if (i < NUM_SENSORS - 1) {
         Logger::print(" | ");
       }
     }
+    Logger::println();
 
-    // =========================================================================
-    // Phase 2: 緊急停止チェック（前方障害物検出）
-    // =========================================================================
-    bool emergency_stop = false;
-    if (sensorData[2].valid && sensorData[2].distance < EMERGENCY_FRONT_THRESHOLD) {
-      emergency_stop = true;
-      Logger::print(" | EMERGENCY!");
+    // 詳細データ行（信号強度・環境光）
+    Logger::print("  sig:");
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+      Logger::print(sensorData[i].peak_signal_mcps, 1);
+      if (i < NUM_SENSORS - 1) Logger::print("/");
     }
-
-    // =========================================================================
-    // Phase 3: 壁検出
-    // =========================================================================
-    WallDetection walls = wallDetector.detect(sensorData);
-
-    // デバッグ: 壁検出結果表示
-    Logger::printWallStatus(walls.left_valid, walls.right_valid);
-    Logger::printWallDistances(walls.left_valid, walls.left_distance,
-                               walls.right_valid, walls.right_distance);
-
-    // =========================================================================
-    // Phase 4: ステアリング角度計算（PID制御）
-    // =========================================================================
-    float steering_angle = steeringController.calculate(walls);
-
-    // デバッグ: モードとステアリング表示
-    steeringController.printDebugInfo();
-    Logger::printSteering(steering_angle);
-
-    // =========================================================================
-    // Phase 5: アクチュエーター制御
-    // =========================================================================
-    if (emergency_stop) {
-      // 緊急停止：中央ステアリング + 停止
-      actuator.setSteering(0.0);
-      actuator.stop();
-    } else {
-      // 通常走行
-      actuator.setSteering(steering_angle);
-      actuator.setSpeed(BASE_SPEED_PULSE);
+    Logger::print(" amb:");
+    for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
+      Logger::print(sensorData[i].ambient_mcps, 1);
+      if (i < NUM_SENSORS - 1) Logger::print("/");
     }
-
-    Logger::println("");
+    Logger::println();
   }
 }
