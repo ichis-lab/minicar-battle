@@ -95,6 +95,32 @@ public:
     #endif
   }
 
+  // 壁角度の表示
+  static void printWallAngles(bool left_valid, float left_angle, bool right_valid, float right_angle) {
+    #if DEBUG_MODE
+      Serial.print(" A:");
+      if (left_valid) {
+        Serial.print(left_angle, 1);
+      } else {
+        Serial.print("---");
+      }
+      Serial.print("/");
+      if (right_valid) {
+        Serial.print(right_angle, 1);
+      } else {
+        Serial.print("---");
+      }
+    #endif
+  }
+
+  // PIDエラー値の表示
+  static void printError(float error) {
+    #if DEBUG_MODE
+      Serial.print(" E:");
+      Serial.print(error, 1);
+    #endif
+  }
+
   // ステアリング角度の表示
   static void printSteering(float angle) {
     #if DEBUG_MODE

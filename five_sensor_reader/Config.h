@@ -34,7 +34,7 @@ const uint8_t ESC_PIN = 10;    // ESC（モーター制御）
 // ============================================================================
 const uint16_t MIN_VALID_DISTANCE = 50;        // 最小有効測定距離（mm）
 const uint16_t RELIABLE_RANGE = 4000;          // 信頼できる測定範囲（mm）L1Xは最大4m
-const uint16_t MAX_SENSOR_DIFF = 600;          // センサーペア間の最大許容差（mm）
+const uint16_t MAX_SENSOR_DIFF = 1000;         // センサーペア間の最大許容差（mm）L1X遠距離対応
 
 // VL53L1X タイミング設定
 const uint32_t L1X_TIMING_BUDGET_US = 50000;   // 測定時間（μs）50ms
@@ -51,22 +51,16 @@ const unsigned long MEASUREMENT_INTERVAL = 60;  // 60ms（L1X測定間隔以上�
 const float MAX_STEERING_ANGLE = 30.0;         // 最大操舵角（度）
 
 // ============================================================================
-// PID パラメータ（両壁モード：距離制御）
+// PID パラメータ（角度ベース統一制御）
 // ============================================================================
-const float STEERING_KP = 0.08;               // 比例ゲイン（deg/mm）
-const float STEERING_KI = 0.05;              // 積分ゲイン
-const float STEERING_KD = 0.02;               // 微分ゲイン
-const float STEERING_INTEGRAL_MAX = 50.0;     // 積分上限（アンチワインドアップ）
+const float STEERING_KP = 0.8;                // 比例ゲイン（deg/deg）
+const float STEERING_KI = 0.05;               // 積分ゲイン
+const float STEERING_KD = 0.1;                // 微分ゲイン
+const float STEERING_INTEGRAL_MAX = 30.0;     // 積分上限（アンチワインドアップ）
+const float STEERING_DEADBAND = 1.0;          // 不感帯（deg）
 
-// 目標壁距離（両壁検出時）
-const float TARGET_CENTER_OFFSET = 0.0;       // 中央からのオフセット（mm）
-
-// ===========================================================================
-// PID パラメータ（片壁モード：角度制御）
-// ============================================================================
-const float ANGLE_KP = 0.8;                   // 比例ゲイン（deg/deg）
-const float ANGLE_KI = 0.05;                   // 積分ゲイン（まず0で開始）
-const float ANGLE_KD = 0.1;                   // 微分ゲイン
+// 両壁モード用: 距離差→角度変換ゲイン
+const float DISTANCE_TO_ANGLE_GAIN = 0.01;    // 100mm差 → 1deg
 
 // ============================================================================
 // 安全パラメータ

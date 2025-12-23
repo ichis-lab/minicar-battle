@@ -2,7 +2,7 @@
  * SteeringController.h
  *
  * ステアリング制御クラス（宣言）
- * PID制御による壁追従制御
+ * 角度ベース統一PID制御による壁追従
  */
 
 #ifndef STEERING_CONTROLLER_H
@@ -13,38 +13,33 @@
 #include "WallDetector.h"
 #include "PIDController.h"
 
-// 制御モード / Control modes
+// 制御モード（デバッグ表示用）
 enum ControlMode {
-    MODE_BOTH_WALLS,    // 両壁検出 → 中央走行 / Both walls → center driving
-    MODE_LEFT_WALL,     // 左壁のみ → 左壁追従 / Left wall only → follow left
-    MODE_RIGHT_WALL,    // 右壁のみ → 右壁追従 / Right wall only → follow right
-    MODE_NO_WALLS       // 壁なし → 直進 / No walls → straight
+    MODE_BOTH_WALLS,    // 両壁検出 → 中央走行
+    MODE_LEFT_WALL,     // 左壁のみ → 左壁追従
+    MODE_RIGHT_WALL,    // 右壁のみ → 右壁追従
+    MODE_NO_WALLS       // 壁なし → 直進
 };
 
 class SteeringController {
 private:
-    PIDController _centeringPID;    // 中央走行用PID（両壁モード：距離制御）
-    PIDController _anglePID;        // 角度制御用PID（片壁モード：壁と平行維持）
-    ControlMode _currentMode;
-    ControlMode _previousMode;
+    PIDController _pid;             // 統一PID（角度ベース）
+    float _lastError;               // 最後のPID入力エラー値
 
 public:
     SteeringController();
 
-    // 初期化 / Initialize
+    // 初期化
     void begin();
 
-    // ステアリング角度を計算 / Calculate steering angle
+    // ステアリング角度を計算
     float calculate(const WallDetection& walls);
 
-    // 現在のモードを取得 / Get current mode
-    ControlMode getMode() const { return _currentMode; }
+    // 最後のエラー値を取得（デバッグ用）
+    float getLastError() const { return _lastError; }
 
-    // PIDをリセット / Reset PID
+    // PIDをリセット
     void reset();
-
-    // デバッグ情報 / Debug info
-    void printDebugInfo() const;
 };
 
 #endif // STEERING_CONTROLLER_H
