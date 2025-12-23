@@ -1,8 +1,10 @@
 /*
  * SteeringController.h
  *
- * ステアリング制御クラス（宣言）
- * 角度ベース統一PID制御による壁追従
+ * シンプル状態ベース制御
+ * - 直進モード: 右壁追従
+ * - コーナリングモード: 開いている方向へ曲がる
+ * - 緊急回避モード: 最大ステアリング
  */
 
 #ifndef STEERING_CONTROLLER_H
@@ -10,21 +12,20 @@
 
 #include <Arduino.h>
 #include "Config.h"
-#include "WallDetector.h"
-#include "PIDController.h"
+#include "SensorReader.h"
 
-// 制御モード（デバッグ表示用）
+// 制御モード
 enum ControlMode {
-    MODE_BOTH_WALLS,    // 両壁検出 → 中央走行
-    MODE_LEFT_WALL,     // 左壁のみ → 左壁追従
-    MODE_RIGHT_WALL,    // 右壁のみ → 右壁追従
-    MODE_NO_WALLS       // 壁なし → 直進
+    MODE_STRAIGHT,      // 直進（右壁追従）
+    MODE_CORNER,        // コーナリング
+    MODE_EMERGENCY,     // 緊急回避
+    MODE_SIDE_AVOID     // 側壁回避
 };
 
 class SteeringController {
 private:
-    PIDController _pid;             // 統一PID（角度ベース）
-    float _lastError;               // 最後のPID入力エラー値
+    ControlMode _currentMode;
+    float _lastSteering;
 
 public:
     SteeringController();
@@ -32,14 +33,14 @@ public:
     // 初期化
     void begin();
 
-    // ステアリング角度を計算
-    float calculate(const WallDetection& walls);
+    // ステアリング角度を計算（センサーデータから直接）
+    float calculate(const SensorData* sensors);
 
-    // 最後のエラー値を取得（デバッグ用）
-    float getLastError() const { return _lastError; }
+    // 現在のモードを取得（デバッグ用）
+    ControlMode getCurrentMode() const { return _currentMode; }
 
-    // PIDをリセット
-    void reset();
+    // モード名を文字列で取得
+    const char* getModeName() const;
 };
 
 #endif // STEERING_CONTROLLER_H

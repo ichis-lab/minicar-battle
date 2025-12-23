@@ -79,9 +79,12 @@ void SensorReader::readAll() {
     _sensorData[i].peak_signal_mcps = _sensors[i].ranging_data.peak_signal_count_rate_MCPS;
     _sensorData[i].ambient_mcps = _sensors[i].ranging_data.ambient_count_rate_MCPS;
 
-    // ステータスが "range valid" (0) なら有効
-    // VL53L1X::rangeStatusToString() で確認可能
-    _sensorData[i].valid = (_sensorData[i].status == 0);
+    // ステータス許容範囲を広げる（0=RangeValid, 1=SigmaFail, 2=SignalFail）
+    // 遠距離で信号が弱い場合もデータとして使用
+    bool statusOk = (_sensorData[i].status <= 2);
+    bool rangeOk = (_sensorData[i].distance >= MIN_VALID_DISTANCE)
+                && (_sensorData[i].distance <= RELIABLE_RANGE);
+    _sensorData[i].valid = statusOk && rangeOk;
   }
 }
 

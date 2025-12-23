@@ -1,7 +1,7 @@
 /*
  * five_sensor_reader.ino
  *
- * 5つのVL53L1Xセンサーを使った角度ベース統一PID制御
+ * 5つのVL53L1Xセンサーを使ったシンプル状態ベース制御
  *
  * 接続:
  * - TCA9548A I2Cマルチプレクサ (アドレス: 0x70)
@@ -17,7 +17,6 @@
 #include "Config.h"
 #include "Logger.h"
 #include "SensorReader.h"
-#include "WallDetector.h"
 #include "SteeringController.h"
 #include "Actuator.h"
 
@@ -25,7 +24,6 @@
 // グローバルオブジェクト
 // ============================================================================
 SensorReader sensorReader;
-WallDetector wallDetector;
 SteeringController steeringController;
 Actuator actuator;
 
@@ -37,19 +35,13 @@ void setup() {
   Logger::begin(115200);
 
   Logger::println("==========================================");
-  Logger::println("  VL53L1X Angle-Based PID Control");
+  Logger::println("  VL53L1X Simple State-Based Control");
   Logger::println("==========================================");
   Logger::print("Debug Mode: ");
   Logger::println(DEBUG_MODE ? "ON (No PWM)" : "OFF (PWM Active)");
   Logger::print("Measurement Interval: ");
   Logger::print(MEASUREMENT_INTERVAL);
   Logger::println("ms");
-  Logger::print("PID Gains: Kp=");
-  Logger::print(STEERING_KP);
-  Logger::print(" Ki=");
-  Logger::print(STEERING_KI);
-  Logger::print(" Kd=");
-  Logger::println(STEERING_KD);
   Logger::println();
 
   // センサー初期化
@@ -99,44 +91,23 @@ void loop() {
     }
 
     // =========================================================================
-    // Phase 2: 緊急停止チェック（前方障害物検出）
+    // Phase 2: ステアリング角度計算（シンプル状態ベース）
     // =========================================================================
-    bool emergency_stop = false;
-    if (sensorData[2].valid && sensorData[2].distance < EMERGENCY_FRONT_THRESHOLD) {
-      emergency_stop = true;
-      Logger::print(" | EMERGENCY!");
-    }
+    float steering_angle = steeringController.calculate(sensorData);
 
-    // =========================================================================
-    // Phase 3: 壁検出
-    // =========================================================================
-    WallDetection walls = wallDetector.detect(sensorData);
-
-    // デバッグ: 壁検出結果表示（状態、距離、角度）
-    Logger::printWallStatus(walls.left_valid, walls.right_valid);
-    Logger::printWallDistances(walls.left_valid, walls.left_distance,
-                               walls.right_valid, walls.right_distance);
-    Logger::printWallAngles(walls.left_valid, walls.left_angle,
-                            walls.right_valid, walls.right_angle);
-
-    // =========================================================================
-    // Phase 4: ステアリング角度計算（角度ベース統一PID）
-    // =========================================================================
-    float steering_angle = steeringController.calculate(walls);
-
-    // デバッグ: エラー値とステアリング表示
-    Logger::printError(steeringController.getLastError());
+    // デバッグ: モードとステアリング表示
+    Logger::print(" | Mode:");
+    Logger::print(steeringController.getModeName());
     Logger::printSteering(steering_angle);
 
     // =========================================================================
-    // Phase 5: アクチュエーター制御
+    // Phase 3: アクチュエーター制御
     // =========================================================================
-    if (emergency_stop) {
-      // 緊急停止：中央ステアリング + 停止
-      actuator.setSteering(0.0);
+    // 緊急モード時は減速
+    if (steeringController.getCurrentMode() == MODE_EMERGENCY) {
+      actuator.setSteering(steering_angle);
       actuator.stop();
     } else {
-      // 通常走行
       actuator.setSteering(steering_angle);
       actuator.setSpeed(BASE_SPEED_PULSE);
     }

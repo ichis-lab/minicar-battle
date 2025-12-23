@@ -2,7 +2,7 @@
  * Config.h
  *
  * 定数・設定値の一元管理
- * Magic Numberを排除し、全ての定数を名前付きで管理
+ * シンプル状態ベース制御用
  */
 
 #ifndef CONFIG_H
@@ -11,7 +11,7 @@
 // ============================================================================
 // デバッグモード設定
 // ============================================================================
-#define DEBUG_MODE true   // true: デバッグ（PWMなし、シリアルあり）
+#define DEBUG_MODE false   // true: デバッグ（PWMなし、シリアルあり）
                           // false: 実機（PWMあり、シリアルなし）
 
 // ============================================================================
@@ -34,7 +34,6 @@ const uint8_t ESC_PIN = 10;    // ESC（モーター制御）
 // ============================================================================
 const uint16_t MIN_VALID_DISTANCE = 50;        // 最小有効測定距離（mm）
 const uint16_t RELIABLE_RANGE = 4000;          // 信頼できる測定範囲（mm）L1Xは最大4m
-const uint16_t MAX_SENSOR_DIFF = 1000;         // センサーペア間の最大許容差（mm）L1X遠距離対応
 
 // VL53L1X タイミング設定
 const uint32_t L1X_TIMING_BUDGET_US = 50000;   // 測定時間（μs）50ms
@@ -46,39 +45,36 @@ const uint32_t L1X_INTER_MEASUREMENT_MS = 50;  // 測定間隔（ms）
 const unsigned long MEASUREMENT_INTERVAL = 60;  // 60ms（L1X測定間隔以上を推奨）
 
 // ============================================================================
-// ステアリングパラメータ
+// ステアリング基本パラメータ
 // ============================================================================
 const float MAX_STEERING_ANGLE = 30.0;         // 最大操舵角（度）
 
 // ============================================================================
-// PID パラメータ（角度ベース統一制御）
+// シンプル制御パラメータ
 // ============================================================================
-const float STEERING_KP = 0.8;                // 比例ゲイン（deg/deg）
-const float STEERING_KI = 0.05;               // 積分ゲイン
-const float STEERING_KD = 0.1;                // 微分ゲイン
-const float STEERING_INTEGRAL_MAX = 30.0;     // 積分上限（アンチワインドアップ）
-const float STEERING_DEADBAND = 1.0;          // 不感帯（deg）
 
-// 両壁モード用: 距離差→角度変換ゲイン
-const float DISTANCE_TO_ANGLE_GAIN = 0.01;    // 100mm差 → 1deg
+// --- 正面壁検出閾値 ---
+const uint16_t CORNER_THRESHOLD = 800;         // コーナリング開始（mm）
+const uint16_t EMERGENCY_THRESHOLD = 300;      // 緊急回避開始（mm）
 
-// ============================================================================
-// 安全パラメータ
-// ============================================================================
-const uint16_t MIN_SAFE_DISTANCE = 300;       // 最低安全距離（mm）左右共通
-const float DISTANCE_AVOID_GAIN = 0.15;       // 距離制約ゲイン
-const uint16_t EMERGENCY_FRONT_THRESHOLD = 200;  // 前方緊急閾値（mm）
+// --- 側壁回避 ---
+const uint16_t MIN_SIDE_DISTANCE = 200;        // 側壁最低距離（mm）
+const float EMERGENCY_AVOID_ANGLE = 20.0;      // 緊急回避ステアリング（度）
 
-// ============================================================================
-// 微分フィルタ
-// ============================================================================
-const float DERIVATIVE_FILTER_ALPHA = 0.3;    // フィルタ係数（0-1、小さいほど強いフィルタ）
+// --- 右壁追従 ---
+const uint16_t TARGET_WALL_DISTANCE = 600;     // 右壁との目標距離（mm）
+const uint16_t WALL_TOLERANCE = 150;           // 許容範囲（mm）
+const float WALL_AVOID_ANGLE = 8.0;            // 壁回避ステアリング（度）
+const float WALL_APPROACH_ANGLE = 5.0;         // 壁接近ステアリング（度）
+
+// --- コーナリング ---
+const float CORNER_ANGLE = 22.0;               // コーナリングステアリング（度）
 
 // ============================================================================
 // サーボ・ESC パルス幅設定
 // ============================================================================
 // サーボ（ステアリング）
-const uint16_t SERVO_CENTER = 1510;           // 中央位置（μs）+10でちょい右に修正
+const uint16_t SERVO_CENTER = 1510;           // 中央位置（μs）
 const uint16_t SERVO_MIN = 600;               // 最小パルス幅（μs）
 const uint16_t SERVO_MAX = 2400;              // 最大パルス幅（μs）
 

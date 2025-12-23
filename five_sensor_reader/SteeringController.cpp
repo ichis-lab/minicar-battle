@@ -1,86 +1,117 @@
 /*
  * SteeringController.cpp
  *
- * ステアリング制御クラス（実装）
- * 角度ベース統一PID制御
+ * シンプル状態ベース制御（実装）
  *
- * 設計思想:
- * - 全モードでPID入力を「角度（deg）」に統一
- * - モード切り替え時にPIDリセットしない（I項・D項が蓄積）
- * - 安全距離制約はPIDの外側で加算
+ * 優先度:
+ * 1. 側壁接近回避（常時チェック）
+ * 2. 緊急回避（正面が非常に近い）
+ * 3. コーナリング（正面に壁）
+ * 4. 直進 + 右壁追従
  */
 
 #include "SteeringController.h"
 #include "Logger.h"
 
 SteeringController::SteeringController() {
-    _lastError = 0.0;
+    _currentMode = MODE_STRAIGHT;
+    _lastSteering = 0.0;
 }
 
 void SteeringController::begin() {
-    // 統一PID初期化（角度ベース）
-    _pid.begin(STEERING_KP, STEERING_KI, STEERING_KD);
-    _pid.setOutputLimits(-MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
-    _pid.setIntegralLimits(-STEERING_INTEGRAL_MAX, STEERING_INTEGRAL_MAX);
-    _pid.setDeadband(STEERING_DEADBAND);
+    _currentMode = MODE_STRAIGHT;
+    _lastSteering = 0.0;
 }
 
-float SteeringController::calculate(const WallDetection& walls) {
-    float error = 0.0;
-
-    if (walls.left_valid && walls.right_valid) {
-        // =================================================================
-        // 両壁モード: 壁角度の平均 + 距離補正
-        // =================================================================
-        float center_angle = (walls.left_angle + walls.right_angle) / 2.0;
-        float distance_correction = (walls.right_distance - walls.left_distance) * DISTANCE_TO_ANGLE_GAIN;
-        error = center_angle + distance_correction;
-
-    } else if (walls.left_valid) {
-        // =================================================================
-        // 左壁モード: 壁との角度
-        // =================================================================
-        error = walls.left_angle;
-
-    } else if (walls.right_valid) {
-        // =================================================================
-        // 右壁モード: 壁との角度
-        // =================================================================
-        error = walls.right_angle;
-
-    } else {
-        // =================================================================
-        // 壁なし: 直進
-        // =================================================================
-        _lastError = 0.0;
+float SteeringController::calculate(const SensorData* sensors) {
+    if (sensors == nullptr) {
         return 0.0;
     }
 
-    // エラー値を保存（デバッグ用）
-    _lastError = error;
+    // センサー値を取得（無効な場合は最大距離として扱う）
+    uint16_t left_far = sensors[0].valid ? sensors[0].distance : RELIABLE_RANGE;
+    uint16_t left_near = sensors[1].valid ? sensors[1].distance : RELIABLE_RANGE;
+    uint16_t front = sensors[2].valid ? sensors[2].distance : RELIABLE_RANGE;
+    uint16_t right_near = sensors[3].valid ? sensors[3].distance : RELIABLE_RANGE;
+    uint16_t right_far = sensors[4].valid ? sensors[4].distance : RELIABLE_RANGE;
 
-    // PID計算（モード切り替えでリセットしない）
-    float steering = _pid.compute(0.0, error);
+    float steering = 0.0;
 
-    // =========================================================================
-    // 安全距離制約（PIDの外側で加算）
-    // =========================================================================
-    if (walls.left_valid && walls.left_distance < MIN_SAFE_DISTANCE) {
-        float shortage = MIN_SAFE_DISTANCE - walls.left_distance;
-        steering += shortage * DISTANCE_AVOID_GAIN;  // 右へ
+    // ========================================
+    // 優先度1: 側壁接近回避（常時チェック）
+    // ========================================
+    if (left_far < MIN_SIDE_DISTANCE) {
+        _currentMode = MODE_SIDE_AVOID;
+        _lastSteering = EMERGENCY_AVOID_ANGLE;  // 右へ
+        return _lastSteering;
     }
-    if (walls.right_valid && walls.right_distance < MIN_SAFE_DISTANCE) {
-        float shortage = MIN_SAFE_DISTANCE - walls.right_distance;
-        steering -= shortage * DISTANCE_AVOID_GAIN;  // 左へ
+    if (right_far < MIN_SIDE_DISTANCE) {
+        _currentMode = MODE_SIDE_AVOID;
+        _lastSteering = -EMERGENCY_AVOID_ANGLE;  // 左へ
+        return _lastSteering;
     }
 
-    // 最大操舵角でクランプ
-    steering = constrain(steering, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
+    // ========================================
+    // 優先度2: 緊急回避（正面が非常に近い）
+    // ========================================
+    if (front < EMERGENCY_THRESHOLD) {
+        _currentMode = MODE_EMERGENCY;
+        uint16_t left_space = min(left_far, left_near);
+        uint16_t right_space = min(right_near, right_far);
 
+        if (left_space > right_space) {
+            steering = -MAX_STEERING_ANGLE;  // 左へ
+        } else {
+            steering = MAX_STEERING_ANGLE;   // 右へ
+        }
+        _lastSteering = steering;
+        return steering;
+    }
+
+    // ========================================
+    // 優先度3: コーナリング（正面に壁）
+    // ========================================
+    if (front < CORNER_THRESHOLD) {
+        _currentMode = MODE_CORNER;
+        uint16_t left_space = min(left_far, left_near);
+        uint16_t right_space = min(right_near, right_far);
+
+        if (left_space > right_space) {
+            steering = -CORNER_ANGLE;  // 左へ
+        } else {
+            steering = CORNER_ANGLE;   // 右へ
+        }
+        _lastSteering = steering;
+        return steering;
+    }
+
+    // ========================================
+    // 優先度4: 直進 + 右壁追従
+    // ========================================
+    _currentMode = MODE_STRAIGHT;
+
+    // 右壁との距離で微調整
+    if (right_far < TARGET_WALL_DISTANCE - WALL_TOLERANCE) {
+        // 右壁に近すぎる → 左へ
+        steering = -WALL_AVOID_ANGLE;
+    } else if (right_far > TARGET_WALL_DISTANCE + WALL_TOLERANCE) {
+        // 右壁から遠すぎる → 右へ
+        steering = WALL_APPROACH_ANGLE;
+    } else {
+        // 適正距離 → 直進
+        steering = 0.0;
+    }
+
+    _lastSteering = steering;
     return steering;
 }
 
-void SteeringController::reset() {
-    _pid.reset();
-    _lastError = 0.0;
+const char* SteeringController::getModeName() const {
+    switch (_currentMode) {
+        case MODE_STRAIGHT:   return "STRAIGHT";
+        case MODE_CORNER:     return "CORNER";
+        case MODE_EMERGENCY:  return "EMERGENCY";
+        case MODE_SIDE_AVOID: return "SIDE_AVOID";
+        default:              return "UNKNOWN";
+    }
 }
