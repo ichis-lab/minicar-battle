@@ -32,8 +32,8 @@ void Actuator::begin() {
 
 void Actuator::setSteering(float angle_degrees) {
   // 角度をパルス幅に変換
-  // 正の角度 = 右へ = パルス幅小、負の角度 = 左へ = パルス幅大
-  // FIXME: SERVO_MAX, SERVO_MINは結局どっちが正解なんだ・・・？
+  // 負の角度 = 左へ = パルス幅小(SERVO_MIN)
+  // 正の角度 = 右へ = パルス幅大(SERVO_MAX)
   int pulse_us = map((int)(angle_degrees * 10), -900, 900, SERVO_MIN, SERVO_MAX);
 
   // 範囲チェック

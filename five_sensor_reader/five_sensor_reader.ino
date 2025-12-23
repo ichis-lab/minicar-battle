@@ -95,9 +95,11 @@ void loop() {
     // =========================================================================
     float steering_angle = steeringController.calculate(sensorData);
 
-    // デバッグ: モードとステアリング表示
+    // デバッグ: モード、壁角度、ステアリング表示
     Logger::print(" | Mode:");
     Logger::print(steeringController.getModeName());
+    Logger::print(" WA:");
+    Logger::print(steeringController.getWallAngle(), 1);
     Logger::printSteering(steering_angle);
 
     // =========================================================================

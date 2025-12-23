@@ -7,7 +7,7 @@
  * 1. 側壁接近回避（常時チェック）
  * 2. 緊急回避（正面が非常に近い）
  * 3. コーナリング（正面に壁）
- * 4. 直進 + 右壁追従
+ * 4. 直進 + 右壁追従（角度補正付き）
  */
 
 #include "SteeringController.h"
@@ -16,11 +16,13 @@
 SteeringController::SteeringController() {
     _currentMode = MODE_STRAIGHT;
     _lastSteering = 0.0;
+    _wallAngle = 0.0;
 }
 
 void SteeringController::begin() {
     _currentMode = MODE_STRAIGHT;
     _lastSteering = 0.0;
+    _wallAngle = 0.0;
 }
 
 float SteeringController::calculate(const SensorData* sensors) {
@@ -42,12 +44,12 @@ float SteeringController::calculate(const SensorData* sensors) {
     // ========================================
     if (left_far < MIN_SIDE_DISTANCE) {
         _currentMode = MODE_SIDE_AVOID;
-        _lastSteering = EMERGENCY_AVOID_ANGLE;  // 右へ
+        _lastSteering = MAX_STEERING_ANGLE * 0.7;  // 右へ
         return _lastSteering;
     }
     if (right_far < MIN_SIDE_DISTANCE) {
         _currentMode = MODE_SIDE_AVOID;
-        _lastSteering = -EMERGENCY_AVOID_ANGLE;  // 左へ
+        _lastSteering = -MAX_STEERING_ANGLE * 0.7;  // 左へ
         return _lastSteering;
     }
 
@@ -77,9 +79,9 @@ float SteeringController::calculate(const SensorData* sensors) {
         uint16_t right_space = min(right_near, right_far);
 
         if (left_space > right_space) {
-            steering = -CORNER_ANGLE;  // 左へ
+            steering = -MAX_STEERING_ANGLE * 0.75;  // 左へ
         } else {
-            steering = CORNER_ANGLE;   // 右へ
+            steering = MAX_STEERING_ANGLE * 0.75;   // 右へ
         }
         _lastSteering = steering;
         return steering;
@@ -90,17 +92,22 @@ float SteeringController::calculate(const SensorData* sensors) {
     // ========================================
     _currentMode = MODE_STRAIGHT;
 
-    // 右壁との距離で微調整
-    if (right_far < TARGET_WALL_DISTANCE - WALL_TOLERANCE) {
-        // 右壁に近すぎる → 左へ
-        steering = -WALL_AVOID_ANGLE;
-    } else if (right_far > TARGET_WALL_DISTANCE + WALL_TOLERANCE) {
-        // 右壁から遠すぎる → 右へ
-        steering = WALL_APPROACH_ANGLE;
-    } else {
-        // 適正距離 → 直進
-        steering = 0.0;
-    }
+    // S3, S4の距離差から壁角度を推定
+    // diff > 0: S4が遠い = 壁から離れている方向
+    // diff < 0: S4が近い = 壁に向かっている方向
+    int wallDiff = (int)right_far - (int)right_near;
+    _wallAngle = -wallDiff * WALL_STEERING_GAIN;
+
+    // 目標距離との差も加味
+    int distError = (int)right_far - (int)TARGET_WALL_DISTANCE;
+
+    // ステアリング = 壁角度補正 + 距離補正
+    // 壁に向かっている → 左へ、離れている → 右へ
+    // 近すぎる → 左へ、遠すぎる → 右へ
+    steering = _wallAngle + distError * WALL_STEERING_GAIN * 0.5;
+
+    // 最大操舵角でクランプ
+    steering = constrain(steering, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
 
     _lastSteering = steering;
     return steering;
@@ -108,10 +115,10 @@ float SteeringController::calculate(const SensorData* sensors) {
 
 const char* SteeringController::getModeName() const {
     switch (_currentMode) {
-        case MODE_STRAIGHT:   return "STRAIGHT";
-        case MODE_CORNER:     return "CORNER";
-        case MODE_EMERGENCY:  return "EMERGENCY";
-        case MODE_SIDE_AVOID: return "SIDE_AVOID";
-        default:              return "UNKNOWN";
+        case MODE_STRAIGHT:   return "ST";
+        case MODE_CORNER:     return "CN";
+        case MODE_EMERGENCY:  return "EM";
+        case MODE_SIDE_AVOID: return "SA";
+        default:              return "??";
     }
 }
