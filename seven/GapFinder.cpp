@@ -71,7 +71,12 @@ int GapFinder::_applyHysteresis(const SensorData* data, int candidateIdx,
 }
 
 float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
-                                      float farthestDist) const {
+                                      float farthestDist,
+                                      bool& outBoostLeft, bool& outBoostRight) const {
+    // ブーストフラグ初期化
+    outBoostLeft = false;
+    outBoostRight = false;
+
     // 隣接センサーのインデックスを決定
     int left_idx = (farthestIdx > 0) ? farthestIdx - 1 : -1;
     int right_idx = (farthestIdx < NUM_SENSORS - 1) ? farthestIdx + 1 : -1;
@@ -95,9 +100,11 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
         // 近い隣接センサーの重みをブースト（コーナー脱出時のイン突き改善）
         if (data[left_idx].distance < CLOSE_NEIGHBOR_THRESHOLD) {
             area_left *= CLOSE_NEIGHBOR_BOOST;
+            outBoostLeft = true;
         }
         if (data[right_idx].distance < CLOSE_NEIGHBOR_THRESHOLD) {
             area_right *= CLOSE_NEIGHBOR_BOOST;
+            outBoostRight = true;
         }
 
         float total_area = area_left + area_right;
@@ -134,7 +141,7 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 // ============================================================================
 
 GapResult GapFinder::find(const SensorData* data) {
-    GapResult result = {0.0f};
+    GapResult result = {0.0f, false, false};
 
     // Step 1: 最も遠いセンサーを見つける
     float farthest_dist;
@@ -149,9 +156,11 @@ GapResult GapFinder::find(const SensorData* data) {
     farthest_idx = _applyHysteresis(data, farthest_idx, farthest_dist,
                                    farthest_dist);
 
-    // Step 3: 目標角度を計算
+    // Step 3: 目標角度を計算（ブースト適用情報も取得）
     result.target_angle = _calculateTargetAngle(data, farthest_idx,
-                                               farthest_dist);
+                                               farthest_dist,
+                                               result.boost_left,
+                                               result.boost_right);
 
     return result;
 }

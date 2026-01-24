@@ -93,24 +93,18 @@ class Logger {
         print((int)targetDistance);
     }
 
-    // ステアリング角度の表示（視覚的インジケーター付き）
+    // ステアリング角度の表示
     static void printSteering(float angle) {
         print(" St:");
         print(angle, 1);
-        print(" ");
+    }
 
-        // 視覚的インジケーター
-        if (angle < -5.0) {
-            // 左に大きく切る
-            int bars = constrain((int)(-angle / 5), 1, 6);
-            for (int i = 0; i < bars; ++i) print("L");
-        } else if (angle > 5.0) {
-            // 右に大きく切る
-            int bars = constrain((int)(angle / 5), 1, 6);
-            for (int i = 0; i < bars; ++i) print("R");
-        } else {
-            // ほぼ中央
-            print("|");
+    // ブースト適用状態の表示
+    static void printBoostStatus(bool boostLeft, bool boostRight) {
+        if (boostLeft || boostRight) {
+            print(" B:");
+            if (boostLeft) print("L");
+            if (boostRight) print("R");
         }
     }
 
@@ -121,15 +115,6 @@ class Logger {
         print(":");
         print(pulse_us);
         print("]");
-    }
-
-    // ループタイミング情報の表示（μs単位）
-    static void printLoopTiming(unsigned long loop_us, unsigned long sensor_us) {
-        print(" | T:");
-        print(loop_us);
-        print("us(S:");
-        print(sensor_us);
-        print("us)");
     }
 
     // タイミング設定のサマリー表示

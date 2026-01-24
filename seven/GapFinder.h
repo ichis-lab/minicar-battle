@@ -21,6 +21,8 @@
 // ギャップ検出結果構造体
 struct GapResult {
     float target_angle;  // 目標方向角度（度）正=右、負=左
+    bool boost_left;     // 左隣接センサーにブースト適用
+    bool boost_right;    // 右隣接センサーにブースト適用
 };
 
 class GapFinder {
@@ -36,7 +38,8 @@ class GapFinder {
 
     // 最遠センサーと隣接センサーから目標角度を計算
     float _calculateTargetAngle(const SensorData* data, int farthestIdx,
-                                float farthestDist) const;
+                                float farthestDist,
+                                bool& outBoostLeft, bool& outBoostRight) const;
 
    public:
     GapFinder();

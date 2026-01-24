@@ -117,16 +117,10 @@ void loop() {
     if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
         lastMeasurement += MEASUREMENT_INTERVAL;
 
-        // タイミング計測開始
-        unsigned long loopStartUs = micros();
-
         // =========================================================================
         // Phase 1: センサーデータ取得
         // =========================================================================
-        unsigned long sensorStartUs = micros();
         sensorReader.readAll();
-        unsigned long sensorEndUs = micros();
-        unsigned long sensorElapsedUs = sensorEndUs - sensorStartUs;
 
         const SensorData* sensorData = sensorReader.getAllData();
 
@@ -165,8 +159,9 @@ void loop() {
         // =========================================================================
         float steering_angle = steeringController.calculate(gap, sensorData);
 
-        // デバッグ: 目標角度とステアリング表示
+        // デバッグ: ステアリング角度とブースト状態表示
         Logger::printSteering(steering_angle);
+        Logger::printBoostStatus(gap.boost_left, gap.boost_right);
 
         // =========================================================================
         // Phase 5: アクチュエーター制御
@@ -182,11 +177,6 @@ void loop() {
                 acceleratorController.calculate(steering_angle, sensorData);
             actuator.setSpeed(variable_speed);
         }
-
-        // タイミング計測終了・表示
-        unsigned long loopEndUs = micros();
-        unsigned long loopElapsedUs = loopEndUs - loopStartUs;
-        Logger::printLoopTiming(loopElapsedUs, sensorElapsedUs);
 
         Logger::println("");
     }
