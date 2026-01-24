@@ -179,6 +179,10 @@ const unsigned long MEASUREMENT_INTERVAL = 40;  // メインループ周期（ms
 const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
 const float BODY_LENGTH_MM = 900.0;     // 車体長（mm）- センサー位置〜後輪軸
 
+// 近隣センサー重みブースト設定（コーナー脱出時のイン突き改善）
+const float CLOSE_NEIGHBOR_THRESHOLD = 600.0f;  // 閾値（mm）: 500〜800
+const float CLOSE_NEIGHBOR_BOOST = 3.0f;        // ブースト倍率: 2.0〜4.0
+
 // 安全パラメータ
 const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // 前方緊急閾値（mm）
 

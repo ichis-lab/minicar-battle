@@ -92,6 +92,14 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
         float area_right = farthestDist * data[right_idx].distance *
                            sin(angle_diff_right * DEG_TO_RAD);
 
+        // 近い隣接センサーの重みをブースト（コーナー脱出時のイン突き改善）
+        if (data[left_idx].distance < CLOSE_NEIGHBOR_THRESHOLD) {
+            area_left *= CLOSE_NEIGHBOR_BOOST;
+        }
+        if (data[right_idx].distance < CLOSE_NEIGHBOR_THRESHOLD) {
+            area_right *= CLOSE_NEIGHBOR_BOOST;
+        }
+
         float total_area = area_left + area_right;
         if (total_area < 0.001f) {
             // ゼロ除算防止: 最遠センサーの角度を返す
