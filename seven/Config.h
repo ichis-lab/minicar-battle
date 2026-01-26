@@ -90,7 +90,7 @@ const float CLOSE_NEIGHBOR_THRESHOLD = 600.0f;
 // ブースト倍率（大きいほどイン側に寄る）
 // 推奨: 2.0（控えめ）〜 4.0（積極的）
 // 無効にしたい場合は1.0
-const float CLOSE_NEIGHBOR_BOOST = 3.0f;
+const float CLOSE_NEIGHBOR_BOOST = 1.0f;
 
 // ============================================================================
 // Pure Pursuitパラメータ
