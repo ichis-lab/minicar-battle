@@ -112,7 +112,16 @@ steering_angle = atan2(2 × L × sin(α), Ld)
 
 - **L**: ホイールベース（mm）- MF-01X = 210mm
 - **α**: 目標点への角度（ラジアン）- GapFinderのtarget_angle
-- **Ld**: ルックアヘッド距離（mm）- **正面センサー(S3)の距離 - 車体長(900mm)**
+- **Ld**: ルックアヘッド距離（mm）- **正面センサー(S3)の距離 - 動的オフセット**
+
+### 動的Ldオフセット
+
+```
+offset = LD_BASE_OFFSET_MM + LD_ANGLE_GAIN × |target_angle|
+```
+
+- 直線（目標角度小）→ オフセット小 → Ld長 → 安定走行
+- カーブ（目標角度大）→ オフセット大 → Ld短 → ステアリング強化
 
 ### 制御フロー
 
@@ -123,7 +132,7 @@ steering_angle = atan2(2 × L × sin(α), Ld)
       ↓
 3. 最遠センサー特定 + 隣接センサーで目標角度計算（GapFinder）
       ↓
-4. Ld = 正面センサー距離 - 車体長（SteeringController）
+4. 動的オフセット計算 + Ld = 正面センサー距離 - オフセット（SteeringController）
       ↓
 5. Pure Pursuitでステアリング角度を決定
       ↓
@@ -177,7 +186,8 @@ const unsigned long MEASUREMENT_INTERVAL = 40;  // メインループ周期（ms
 
 // Pure Pursuitパラメータ
 const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
-const float BODY_LENGTH_MM = 900.0;     // 車体長（mm）- センサー位置〜後輪軸
+const float LD_BASE_OFFSET_MM = 1000.0; // Ld基準オフセット（直線時）
+const float LD_ANGLE_GAIN = 10.0;       // 角度1度あたりのオフセット増加量（mm/deg）
 
 // 近隣センサー重みブースト設定（コーナー脱出時のイン突き改善）
 const float CLOSE_NEIGHBOR_THRESHOLD = 600.0f;  // 閾値（mm）: 500〜800

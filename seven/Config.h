@@ -97,10 +97,16 @@ const float CLOSE_NEIGHBOR_BOOST = 3.0f;
 // 公式: steering_angle = atan2(2 × L × sin(α), Ld)
 //   L: ホイールベース（mm）
 //   α: 目標点への角度（ラジアン）
-//   Ld: ルックアヘッド距離（mm）- 正面センサー距離 - 車体長
+//   Ld: ルックアヘッド距離（mm）- 正面センサー距離 - offset
+//
+// Ld動的オフセット:
+//   offset = LD_BASE_OFFSET_MM + LD_ANGLE_GAIN × |target_angle|
+//   直線（目標角度小）→ オフセット小 → Ld長 → 安定走行
+//   カーブ（目標角度大）→ オフセット大 → Ld短 → ステアリング強化
 // ============================================================================
-const float WHEELBASE_MM = 210.0;    // ホイールベース（mm）- MF-01X
-const float BODY_LENGTH_MM = 1050.0;  // 車体長（mm）- センサー位置〜後輪軸
+const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
+const float LD_BASE_OFFSET_MM = 1000.0; // 基準オフセット（直線時）
+const float LD_ANGLE_GAIN = 10.0;       // 角度1度あたりのオフセット増加量（mm/deg）
 
 // ============================================================================
 // 安全パラメータ
