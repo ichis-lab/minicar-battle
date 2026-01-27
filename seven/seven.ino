@@ -103,13 +103,19 @@ void loop() {
     unsigned long currentTime = millis();
 
 #if ENABLE_BLUETOOTH_EMERGENCY
-    // Bluetooth経由で入力があれば緊急停止
+    // Bluetooth経由で's'のみ（単独）受信したら緊急停止
     if (Serial1.available()) {
-        actuator.setSteering(0.0);
-        actuator.stop();
-        while (1) {
-            delay(1000);
-        }  // 終了
+        String received = "";
+        while (Serial1.available()) {
+            received += (char)Serial1.read();
+        }
+        if (received == "s") {
+            actuator.setSteering(0.0);
+            actuator.stop();
+            while (1) {
+                delay(1000);
+            }  // 終了
+        }
     }
 #endif
 
