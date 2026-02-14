@@ -77,7 +77,12 @@ const float FARTHEST_HYSTERESIS = 100.0;  // 最遠センサー切り替えの�
 //   Ld: ルックアヘッド距離（mm）- 正面センサー距離 - 車体長
 // ============================================================================
 const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
-const float LOOKAHEAD_OFFSET_MM = 1100.0;  // Ld計算オフセット（mm）- 手動探索で最適化した値. 1640で900にし, 1660は1000, 1680で1100とする
+// Ld計算オフセット（mm）- 正面距離に応じて動的に変化
+// 却下履歴: LOOKAHEAD_OFFSET_MM = 1100固定: 3周18.7秒（直線蛇行と急カーブ応答のトレードオフ）
+const float LOOKAHEAD_NEAR_DIST = 2000.0;    // 近距離基準点（mm）
+const float LOOKAHEAD_FAR_DIST = 3000.0;     // 遠距離基準点（mm）
+const float LOOKAHEAD_OFFSET_NEAR = 1200.0;  // 近距離時のオフセット（mm）→ Ld小 → 応答鋭い
+const float LOOKAHEAD_OFFSET_FAR = 600.0;    // 遠距離時のオフセット（mm）→ Ld大 → 応答穏やか
 
 // ============================================================================
 // 安全パラメータ

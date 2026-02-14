@@ -29,10 +29,19 @@ float SteeringController::calculate(const GapResult& gap, const SensorData* sens
 
     float alpha_deg = gap.target_angle;
 
-    // 正面センサーの距離からオフセットを引いてルックアヘッド距離とする
-    float Ld_mm = sensorData[FRONT_SENSOR_INDEX].valid
-                  ? sensorData[FRONT_SENSOR_INDEX].distance - LOOKAHEAD_OFFSET_MM
-                  : 1000.0f;  // センサー無効時のフォールバック
+    // 正面センサーの距離に応じてオフセットを動的に計算し、ルックアヘッド距離を算出
+    float front_dist = sensorData[FRONT_SENSOR_INDEX].valid
+                       ? (float)sensorData[FRONT_SENSOR_INDEX].distance
+                       : 2000.0f;  // センサー無効時のフォールバック
+
+    // 線形補間: 正面が近い→オフセット大（応答鋭い）、遠い→オフセット小（応答穏やか）
+    float offset = (float)map(
+        (long)(front_dist),
+        (long)LOOKAHEAD_NEAR_DIST, (long)LOOKAHEAD_FAR_DIST,
+        (long)LOOKAHEAD_OFFSET_NEAR, (long)LOOKAHEAD_OFFSET_FAR);
+    offset = constrain(offset, LOOKAHEAD_OFFSET_FAR, LOOKAHEAD_OFFSET_NEAR);
+
+    float Ld_mm = front_dist - offset;
 
     // ゼロ除算防止
     if (Ld_mm < 50.0f) Ld_mm = 50.0f;
