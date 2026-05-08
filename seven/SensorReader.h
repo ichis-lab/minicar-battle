@@ -1,8 +1,7 @@
 /*
  * SensorReader.h
  *
- * センサー読み取りクラス（宣言）
- * TCA9548A経由でVL53L1Xセンサーからデータ取得
+ * Reads VL53L1X sensors through the TCA9548A I2C multiplexer.
  */
 
 #ifndef SENSOR_READER_H
@@ -14,32 +13,30 @@
 
 #include "Config.h"
 
-// センサーデータ構造体
+// One sensor reading.
 struct SensorData {
-    uint16_t distance;         // 測定距離（mm）
-    bool valid;                // 測定値の有効性
+    uint16_t distance;  // measured distance (mm)
+    bool valid;         // true when the reading is within the trusted range
 };
 
-// センサーリーダークラス
 class SensorReader {
    private:
     VL53L1X _sensors[NUM_SENSORS];
     SensorData _sensorData[NUM_SENSORS];
 
-    // TCA9548Aのチャンネル選択
+    // Select the active TCA9548A channel.
     void _selectChannel(uint8_t channel);
 
    public:
-    // コンストラクタ
     SensorReader();
 
-    // 初期化
+    // Initialize the multiplexer and all sensors.
     bool begin();
 
-    // 全センサーからデータ取得
+    // Read every sensor once.
     void readAll();
 
-    // 全センサーデータの配列を取得
+    // Get the cached readings.
     const SensorData* getAllData() const;
 };
 

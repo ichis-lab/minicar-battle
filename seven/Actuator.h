@@ -1,8 +1,8 @@
 /*
  * Actuator.h
  *
- * アクチュエーター制御クラス（宣言）
- * サーボとESCのPWM制御（DEBUG_MODEに応じて出力制御）
+ * PWM control for the steering servo and the ESC.
+ * Output is gated on RUN_MODE (see Config.h).
  */
 
 #ifndef ACTUATOR_H
@@ -19,19 +19,18 @@ class Actuator {
     Servo _escController;
 
    public:
-    // コンストラクタ
     Actuator();
 
-    // 初期化
+    // Attach the servo and ESC and set them to safe defaults.
     void begin();
 
-    // ステアリング角度を設定（度数法）
+    // Set the steering angle in degrees.
     void setSteering(float angle_degrees);
 
-    // 速度を設定（μs単位のパルス幅）
+    // Set the ESC throttle as a raw pulse width (us).
     void setSpeed(uint16_t speed_pulse_us);
 
-    // 停止
+    // Cut throttle.
     void stop();
 };
 

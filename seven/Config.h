@@ -1,109 +1,112 @@
 /*
  * Config.h
  *
- * 定数・設定値の一元管理
- * Magic Numberを排除し、全ての定数を名前付きで管理
+ * Centralized configuration values.
+ * All constants are named here to avoid magic numbers.
  */
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
 // ============================================================================
-// 動作モード設定
+// Run mode
 // ============================================================================
-// モード定義:
-//   0: MODE_DEBUG      - デバッグ専用（PWMなし、シリアルあり）
-//   1: MODE_PRODUCTION - 本番走行（PWMあり、シリアルなし）
-//   2: MODE_DEBUG_RUN  - デバッグ走行（PWMあり、シリアルあり）
+// Mode definitions:
+//   0: MODE_DEBUG      - debug only (no PWM, serial enabled)
+//   1: MODE_PRODUCTION - race run (PWM enabled, serial disabled)
+//   2: MODE_DEBUG_RUN  - debug run (PWM enabled, serial enabled)
 #define MODE_DEBUG 0
 #define MODE_PRODUCTION 1
 #define MODE_DEBUG_RUN 2
 
-#define RUN_MODE MODE_DEBUG // ← ここで動作モードを選択
+#define RUN_MODE MODE_DEBUG // select run mode here
 
-// 各機能の有効/無効を自動設定
+// Feature toggles derived from RUN_MODE
 #define ENABLE_SERIAL (RUN_MODE == MODE_DEBUG || RUN_MODE == MODE_DEBUG_RUN)
 #define ENABLE_PWM (RUN_MODE == MODE_PRODUCTION || RUN_MODE == MODE_DEBUG_RUN)
 
 // ============================================================================
-// ハードウェア設定
+// Hardware
 // ============================================================================
-// TCA9548A I2Cマルチプレクサ
+// TCA9548A I2C multiplexer
 const uint8_t TCA9548A_ADDR = 0x70;
 
-// センサー設定
+// Sensor layout
 const uint8_t NUM_SENSORS = 7;
 const uint8_t SENSOR_CHANNELS[NUM_SENSORS] = {0, 1, 2, 3, 4, 5, 6};
-const float SENSOR_ANGLES[NUM_SENSORS] = {-50.0, -30.0, -15.0, 0.0, 15.0, 30.0, 50.0}; // 実設置は±60°だが、この値で決勝17.5秒（優勝）を達成
-const uint8_t FRONT_SENSOR_INDEX = 3;  // 正面センサーのインデックス（0度）
+// Physical mounting is +/-60deg, but these tuned values produced the winning 17.5s final (3 laps).
+const float SENSOR_ANGLES[NUM_SENSORS] = {-50.0, -30.0, -15.0, 0.0, 15.0, 30.0, 50.0};
+const uint8_t FRONT_SENSOR_INDEX = 3;  // index of the front-facing sensor (0 deg)
 
-// PWM出力ピン
-const uint8_t SERVO_PIN = 9;  // ステアリングサーボ
-const uint8_t ESC_PIN = 10;   // ESC（モーター制御）
-
-// ============================================================================
-// センサーパラメータ
-// ============================================================================
-const uint16_t MIN_VALID_DISTANCE = 50;  // 最小有効測定距離（mm）
-const uint16_t RELIABLE_RANGE = 4000;    // 信頼できる測定範囲（mm）L1Xは最大4m
-// VL53L1X タイミング設定
-const uint32_t L1X_TIMING_BUDGET_US = 33000;   // 測定時間（μs）50ms
-const uint32_t L1X_INTER_MEASUREMENT_MS = 40;  // 測定間隔（ms）
+// PWM output pins
+const uint8_t SERVO_PIN = 9;  // steering servo
+const uint8_t ESC_PIN = 10;   // ESC (motor)
 
 // ============================================================================
-// タイミング設定
-// 40が最低値で秒間当たりの測定回数を最大化可能. 
-// 40 ~ 60がセンサーのMediumモードの範囲で, 有効測定距離は~3m程度になる
+// Sensor parameters
 // ============================================================================
-const unsigned long MEASUREMENT_INTERVAL = 40;  // （L1X測定間隔以上を推奨）
+const uint16_t MIN_VALID_DISTANCE = 50;  // minimum valid range (mm)
+const uint16_t RELIABLE_RANGE = 4000;    // reliable measurement range (mm); VL53L1X max is 4m
+// VL53L1X timing
+const uint32_t L1X_TIMING_BUDGET_US = 33000;   // measurement budget (us)
+const uint32_t L1X_INTER_MEASUREMENT_MS = 40;  // inter-measurement period (ms)
+
+// ============================================================================
+// Loop timing
+// 40ms is the floor and maximizes measurements per second.
+// 40-60ms is the VL53L1X medium-mode range (~3m effective).
+// ============================================================================
+const unsigned long MEASUREMENT_INTERVAL = 40;  // must be >= L1X inter-measurement period
 
 
 // ============================================================================
-// ステアリングパラメータ
+// Steering
 // ============================================================================
-const float MAX_STEERING_ANGLE = 30.0;  // 最大操舵角（度）
+const float MAX_STEERING_ANGLE = 30.0;  // max steering angle (deg)
 
 // ============================================================================
-// ギャップ検出パラメータ
-// 0~200辺りで試験済みだが、蛇行には明確な効果なし
+// Gap detection
+// Tested 0-200; no clear effect on yaw oscillation.
 // ============================================================================
-const float FARTHEST_HYSTERESIS = 100.0;  // 最遠センサー切り替えのヒステリシス（mm）0~300で試験済
+const float FARTHEST_HYSTERESIS = 100.0;  // hysteresis for farthest-sensor switching (mm); tested 0-300
 
 // ============================================================================
-// Pure Pursuitパラメータ
-// 公式: steering_angle = atan2(2 × L × sin(α), Ld)
-//   L: ホイールベース（mm）
-//   α: 目標点への角度（ラジアン）
-//   Ld: ルックアヘッド距離（mm）- 正面センサー距離 - 車体長
+// Pure Pursuit
+// Formula: steering_angle = atan2(2 * L * sin(alpha), Ld)
+//   L:     wheelbase (mm)
+//   alpha: angle to the target point (rad)
+//   Ld:    lookahead distance (mm) = front sensor distance - body length
 // ============================================================================
-const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
-const float LOOKAHEAD_OFFSET_MM = 1100.0;  // Ld計算オフセット（mm）- 手動探索で最適化した値. 1640で900にし, 1660は1000, 1680で1100,以降を1200
+const float WHEELBASE_MM = 210.0;       // wheelbase (mm), MF-01X
+// Manually tuned. Sweep history: SPEED 1640 -> 900, 1660 -> 1000, 1680 -> 1100, > 1680 -> 1200.
+const float LOOKAHEAD_OFFSET_MM = 1100.0;
 
 // ============================================================================
-// 安全パラメータ
+// Safety
 // ============================================================================
-const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // 前方緊急閾値（mm）
+const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // front emergency-stop threshold (mm)
 
-// タイムアウト自動停止（デバッグ用）
-// 0 = 無効、それ以外 = 指定秒数後に自動停止
+// Auto-stop timeout (debug aid).
+// 0 disables it; otherwise the car stops after this many seconds.
 const unsigned long AUTO_STOP_SECONDS = 20;
 
 // ============================================================================
-// サーボ・ESC パルス幅設定
+// Servo / ESC pulse widths
 // ============================================================================
-// サーボ（ステアリング）- 新サーボ: 1200(右)〜1500(中央)〜1800(左), セッティングによって若干のズレあり修正済み
-const uint16_t SERVO_CENTER = 1415;  // 中央位置（μs）
-const uint16_t SERVO_MIN = 1115;     // 最小パルス幅（μs）= 最も右
-const uint16_t SERVO_MAX = 1715;     // 最大パルス幅（μs）= 最も左
+// Steering servo. New servo nominal range is 1200(R)-1500(C)-1800(L);
+// values below are calibrated for the current install.
+const uint16_t SERVO_CENTER = 1415;  // center (us)
+const uint16_t SERVO_MIN = 1115;     // min pulse (us) = full right
+const uint16_t SERVO_MAX = 1715;     // max pulse (us) = full left
 
-// ESC（速度制御）
-const uint16_t ESC_STOP_US = 1500;   // 停止（μs）
-const uint16_t ESC_MIN_US = 1000;    // ESC最小パルス（μs）
-const uint16_t ESC_MAX_US = 2000;    // ESC最大パルス（μs）
-const uint16_t SPEED_US = 1680;      // 走行速度パルス（μs）
+// ESC
+const uint16_t ESC_STOP_US = 1500;   // neutral / stop (us)
+const uint16_t ESC_MIN_US = 1000;    // min ESC pulse (us)
+const uint16_t ESC_MAX_US = 2000;    // max ESC pulse (us)
+const uint16_t SPEED_US = 1680;      // cruise pulse (us)
 
 // ============================================================================
-// 数学定数
+// Math constants
 // ============================================================================
 #ifndef DEG_TO_RAD
 #define DEG_TO_RAD 0.017453292519943295f  // PI / 180.0
@@ -113,8 +116,8 @@ const uint16_t SPEED_US = 1680;      // 走行速度パルス（μs）
 #define RAD_TO_DEG 57.29577951308232f  // 180.0 / PI
 #endif
 
-// センサー間角度差のsin値（事前計算）
-const float SIN_15_DEG = 0.2588190451f;  // sin(15° × π/180)
-const float SIN_20_DEG = 0.3420201433f;  // sin(20° × π/180)
+// Precomputed sin values for the angular gaps between sensors
+const float SIN_15_DEG = 0.2588190451f;  // sin(15deg)
+const float SIN_20_DEG = 0.3420201433f;  // sin(20deg)
 
 #endif  // CONFIG_H

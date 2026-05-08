@@ -1,297 +1,296 @@
-# Seven - 最遠+隣接センサー方式 自動走行システム
+# Seven - autonomous driver based on the farthest-sensor + neighbors method
 
-7つのVL53L1X ToFセンサーと最遠+隣接センサー方式を使用した、Arduino Nano R4向け自動走行制御システム。
+An autonomous driving control system for the Arduino Nano R4, built on seven VL53L1X ToF sensors and the farthest-sensor + neighbors method.
 
-**競技結果: 決勝3周17.5秒（優勝）**
-
----
-
-## システム概要
-
-### アーキテクチャ
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                       Arduino Nano R4                            │
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ SensorReader │───▶│  GapFinder   │───▶│ SteeringController│   │
-│  │  (I2C読取)   │    │(目標角度決定) │    │  (Pure Pursuit)   │   │
-│  └──────────────┘    └──────────────┘    └────────┬─────────┘   │
-│                                                   │             │
-│  ┌──────────────┐      ┌─────────────────────────▼──────┐      │
-│  │  TCA9548A    │      │            Actuator             │      │
-│  │ マルチプレクサ│      │    (PWM出力 + 定速走行)         │      │
-│  └──────────────┘      └──────────────────────────────────┘      │
-└───────┬──────────────────────────────────────────┬───────────────┘
-        │                                          │
-   ┌────┴────┐                               ┌─────┴─────┐
-   │ VL53L1X │ × 7                           │サーボ/ESC │
-   └─────────┘                               └───────────┘
-```
-
-### センサー配置
-
-```
-                   正面 (Sensor 3: 0°)
-                         │
-              -15°       │       +15°
-               (S2)      │      (S4)
-         -30°     \      │      /     +30°
-          (S1)     \     │     /     (S5)
-    -60°            \    │    /            +60°
-  (Sensor 0)             │             (Sensor 6)
-     左                   │                   右
-```
-
-| センサー | チャンネル | 角度 | 役割 |
-|---------|-----------|------|------|
-| Sensor 0 | CH0 | -60° | 左側方 |
-| Sensor 1 | CH1 | -30° | 左斜め前 |
-| Sensor 2 | CH2 | -15° | 左前方 |
-| Sensor 3 | CH3 | 0° | 正面 |
-| Sensor 4 | CH4 | +15° | 右前方 |
-| Sensor 5 | CH5 | +30° | 右斜め前 |
-| Sensor 6 | CH6 | +60° | 右側方 |
+**Race result: 3 laps in 17.5s in the final (1st place).**
 
 ---
 
-## ファイル構成
+## System overview
+
+### Architecture
+
+```
++------------------------------------------------------------------+
+|                       Arduino Nano R4                            |
+|                                                                  |
+|  +--------------+    +--------------+    +-------------------+   |
+|  | SensorReader |--->|  GapFinder   |--->| SteeringController|   |
+|  |  (I2C read)  |    | (target deg) |    |  (Pure Pursuit)   |   |
+|  +--------------+    +--------------+    +---------+---------+   |
+|                                                    |             |
+|  +--------------+      +---------------------------v--------+    |
+|  |  TCA9548A    |      |            Actuator                |    |
+|  |  multiplexer |      |     (PWM out + cruise control)     |    |
+|  +--------------+      +-------------------------------------+   |
++-------+--------------------------------------+-------------------+
+        |                                      |
+   +----+----+                            +----+-----+
+   | VL53L1X | x 7                        | servo/ESC|
+   +---------+                            +----------+
+```
+
+### Sensor layout
+
+```
+                   front (Sensor 3: 0deg)
+                         |
+              -15deg     |     +15deg
+               (S2)      |      (S4)
+         -30deg   \      |      /   +30deg
+          (S1)     \     |     /     (S5)
+    -60deg          \    |    /          +60deg
+  (Sensor 0)             |             (Sensor 6)
+     left                |                   right
+```
+
+| Sensor   | Channel | Angle  | Role         |
+|----------|---------|--------|--------------|
+| Sensor 0 | CH0     | -60deg | left side    |
+| Sensor 1 | CH1     | -30deg | left front   |
+| Sensor 2 | CH2     | -15deg | left forward |
+| Sensor 3 | CH3     | 0deg   | front        |
+| Sensor 4 | CH4     | +15deg | right forward|
+| Sensor 5 | CH5     | +30deg | right front  |
+| Sensor 6 | CH6     | +60deg | right side   |
+
+---
+
+## File layout
 
 ```
 seven/
-├── seven.ino                   # メインスケッチ（エントリーポイント）
-├── Config.h                    # 全設定値の一元管理
-├── SensorReader.cpp/h          # VL53L1Xセンサー読み取り
-├── GapFinder.cpp/h             # 最遠+隣接センサー方式による目標角度決定
-├── SteeringController.cpp/h    # Pure Pursuit制御によるステアリング計算
-├── Actuator.cpp/h              # サーボ・ESCへのPWM出力（定速走行）
-└── Logger.h                    # デバッグ出力（ヘッダーオンリー）
+├── seven.ino                   # main sketch (entry point)
+├── Config.h                    # all tunables and constants
+├── SensorReader.cpp/h          # VL53L1X reads via TCA9548A
+├── GapFinder.cpp/h             # target angle from farthest sensor + neighbors
+├── SteeringController.cpp/h    # steering angle via Pure Pursuit
+├── Actuator.cpp/h              # servo/ESC PWM output (cruise speed)
+└── Logger.h                    # header-only debug logger
 ```
 
 ---
 
-## 最遠+隣接センサー方式
+## Farthest-sensor + neighbors method
 
-### 概要
+### Idea
 
-最も遠いセンサーを基準に、その隣接センサーを含めた距離重み付けで目標角度を決定する方式。
+Pick the farthest valid sensor and combine it with its neighbors to compute a target angle by distance weighting.
 
-### アルゴリズム
+### Algorithm
 
-1. 有効な7センサーから距離が最も遠い1つを選択
-2. その隣接センサー（左右）を取得（端の場合は片側のみ）
-3. 最遠センサー+隣接センサーの距離で重み付けした角度をtarget_angleとする
+1. Pick the farthest valid sensor out of the 7.
+2. Take its left/right neighbors when available (only one side at the array ends).
+3. Compute the target angle as a distance-weighted blend of those readings.
 
-### 処理フロー
+### Pipeline
 
 ```
-1. センサーデータ取得
-      ↓
-2. 最遠センサーを特定（ヒステリシス付き）
-      ↓
-3. 隣接センサーを含めた距離重み付けで目標角度を計算
-      ↓
-4. Ld = 正面センサー距離 - 車体長
-      ↓
-5. Pure Pursuit制御でステアリング角度を決定
+1. read sensors
+      v
+2. pick the farthest sensor (with hysteresis)
+      v
+3. compute target angle from the farthest + neighbors
+      v
+4. Ld = front sensor distance - body length
+      v
+5. derive steering angle via Pure Pursuit
 ```
 
-### メリット
+### Why this method
 
-- **直線安定性**: 3点を使うことでバランスが取れる
-- **タイトコーナー対応**: 絶対閾値に依存しないため、狭い環境でも確実に動作
-- **シンプル**: 複雑なギャップ検出・スコアリングが不要
+- **Stable on straights**: blending three readings smooths jitter.
+- **Tight corners**: no absolute distance threshold, so it still works in narrow sections.
+- **Simple**: no complex gap scoring or segmentation.
 
-### 端センサーの処理
+### Edge sensors
 
-- センサー0（-60°）が最遠 → センサー0,1の2点で計算
-- センサー6（+60°）が最遠 → センサー5,6の2点で計算
+- Sensor 0 (-60deg) is farthest -> use sensors 0 and 1.
+- Sensor 6 (+60deg) is farthest -> use sensors 5 and 6.
 
 ---
 
-## Pure Pursuit制御
+## Pure Pursuit
 
-### 概要
+### Idea
 
-Pure Pursuitは、車両の後輪軸中心から目標点へ向かう円弧を描く経路追従アルゴリズム。
-GapFinderが検出した目標方向と距離をそのままPure Pursuitの入力として使用する。
+Pure Pursuit traces an arc from the rear axle to a target point. The target heading and lookahead distance from GapFinder feed straight into Pure Pursuit.
 
-### 計算式
+### Formula
 
 ```
-steering_angle = atan2(2 × L × sin(α), Ld)
+steering_angle = atan2(2 * L * sin(alpha), Ld)
 ```
 
-- **L**: ホイールベース（mm）- MF-01X = 210mm
-- **α**: 目標点への角度（ラジアン）- GapFinderのtarget_angle
-- **Ld**: ルックアヘッド距離（mm）- 正面センサー(S3)距離 - 車体長(1200mm)、最小50mm
+- **L**: wheelbase (mm). MF-01X = 210mm.
+- **alpha**: angle to the target point (rad). Comes from GapFinder.target_angle.
+- **Ld**: lookahead distance (mm). Front sensor (S3) distance minus body length (1200mm), with a minimum of 50mm.
 
-### 特徴
+### Properties
 
-- **距離適応型**: 同じ角度でも距離が近いほど急旋回、遠いほど緩旋回
-- **幾何学的**: 車両の運動学に基づいた理論的なアプローチ
-- **ステートレス**: 過去の状態を保持しないため、急な状況変化にも即応
+- **Distance-aware**: the same angle yields a tighter turn at short Ld and a softer turn at long Ld.
+- **Geometric**: based on the vehicle's kinematics, not heuristics.
+- **Stateless**: no history to drift, so it reacts immediately to changes.
 
-### パラメータ
+### Tunables
 
-| パラメータ | 値 | 効果 |
-|-----------|----|----|
-| WHEELBASE_MM | 210 | ホイールベース（大きいほど緩旋回） |
-| LOOKAHEAD_OFFSET_MM | 1200 | Ld計算オフセット（手動探索で最適化） |
-
----
-
-## Config.h パラメータ一覧
-
-### 動作モード
-
-| 定数 | 値 | 説明 |
-|------|----|----|
-| `MODE_DEBUG` | 0 | デバッグ専用（PWMなし、シリアルあり） |
-| `MODE_PRODUCTION` | 1 | 本番走行（PWMあり、シリアルなし） |
-| `MODE_DEBUG_RUN` | 2 | デバッグ走行（PWMあり、シリアルあり） |
-| `RUN_MODE` | - | 上記から選択 |
-
-### ハードウェア設定
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `TCA9548A_ADDR` | uint8_t | 0x70 | I2Cマルチプレクサアドレス |
-| `NUM_SENSORS` | uint8_t | 7 | センサー数 |
-| `SENSOR_ANGLES` | float[] | {-60,-30,-15,0,15,30,60} | 各センサーの取付角度（度） |
-| `FRONT_SENSOR_INDEX` | uint8_t | 3 | 正面センサーのインデックス（0度） |
-| `SERVO_PIN` | uint8_t | 9 | ステアリングサーボのピン |
-| `ESC_PIN` | uint8_t | 10 | ESCのピン |
-
-### センサーパラメータ
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `MIN_VALID_DISTANCE` | uint16_t | 50 | 最小有効測定距離（mm） |
-| `RELIABLE_RANGE` | uint16_t | 4000 | 信頼できる測定範囲（mm） |
-| `L1X_TIMING_BUDGET_US` | uint32_t | 33000 | VL53L1X測定時間（μs） |
-| `L1X_INTER_MEASUREMENT_MS` | uint32_t | 40 | VL53L1X測定間隔（ms） |
-
-### タイミング設定
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `MEASUREMENT_INTERVAL` | unsigned long | 40 | メインループ周期（ms） |
-
-### ステアリングパラメータ
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `MAX_STEERING_ANGLE` | float | 30.0 | 最大操舵角（度） |
-
-### Pure Pursuitパラメータ
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `WHEELBASE_MM` | float | 210.0 | ホイールベース（mm） |
-| `LOOKAHEAD_OFFSET_MM` | float | 1200.0 | Ld計算オフセット（mm）- 手動探索で最適化した値 |
-
-### ギャップ検出パラメータ
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `FARTHEST_HYSTERESIS` | float | 100.0 | 最遠センサー切り替えのヒステリシス（mm） |
-
-ヒステリシス動作:
-- 最遠センサーの切り替えにヒステリシスを適用して安定化
-- 新しいセンサーが現在のセンサーより100mm以上遠い場合のみ切り替え
-
-### 安全パラメータ
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `EMERGENCY_FRONT_THRESHOLD` | uint16_t | 400 | 前方緊急停止閾値（mm） |
-
-### サーボ設定（μs単位）
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `SERVO_CENTER` | uint16_t | 1415 | 中央位置 |
-| `SERVO_MIN` | uint16_t | 1115 | 最小パルス幅（右） |
-| `SERVO_MAX` | uint16_t | 1715 | 最大パルス幅（左） |
-
-### ESC設定（μs単位）
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `ESC_STOP_US` | uint16_t | 1500 | 停止 |
-| `ESC_MIN_US` | uint16_t | 1000 | 最小パルス幅 |
-| `ESC_MAX_US` | uint16_t | 2000 | 最大パルス幅 |
-
-### 速度設定（定速走行）
-
-| 定数 | 型 | 値 | 説明 |
-|------|----|----|------|
-| `SPEED_US` | uint16_t | 1680 | 走行速度パルス（μs） |
+| Name                  | Value | Effect                                            |
+|-----------------------|-------|---------------------------------------------------|
+| WHEELBASE_MM          | 210   | Wheelbase. Larger -> softer turns.                |
+| LOOKAHEAD_OFFSET_MM   | 1200  | Ld offset. Tuned manually.                        |
 
 ---
 
-## ハードウェア要件
+## Config.h reference
 
-- **マイコン**: Arduino Nano R4
-- **センサー**: VL53L1X ToFセンサー × 7
-- **I2Cマルチプレクサ**: TCA9548A
-- **ステアリング**: サーボモーター
-- **駆動**: ESC + ブラシレスモーター
+### Run mode
 
-### 配線
+| Constant         | Value | Description                              |
+|------------------|-------|------------------------------------------|
+| `MODE_DEBUG`     | 0     | Debug only (no PWM, serial enabled)      |
+| `MODE_PRODUCTION`| 1     | Race run (PWM enabled, serial disabled)  |
+| `MODE_DEBUG_RUN` | 2     | Debug run (PWM and serial enabled)       |
+| `RUN_MODE`       | -     | Pick one of the above                    |
 
-| 接続元 | 接続先 |
-|-------|-------|
-| Arduino SDA | TCA9548A SDA |
-| Arduino SCL | TCA9548A SCL |
-| TCA9548A CH0-6 | VL53L1X × 7 |
-| Arduino Pin 9 | サーボ信号線 |
-| Arduino Pin 10 | ESC信号線 |
+### Hardware
+
+| Name                 | Type     | Value                          | Description                       |
+|----------------------|----------|--------------------------------|-----------------------------------|
+| `TCA9548A_ADDR`      | uint8_t  | 0x70                           | I2C multiplexer address           |
+| `NUM_SENSORS`        | uint8_t  | 7                              | Sensor count                      |
+| `SENSOR_ANGLES`      | float[]  | {-60,-30,-15,0,15,30,60}       | Mounting angle per sensor (deg)   |
+| `FRONT_SENSOR_INDEX` | uint8_t  | 3                              | Index of the front sensor (0deg)  |
+| `SERVO_PIN`          | uint8_t  | 9                              | Steering servo pin                |
+| `ESC_PIN`            | uint8_t  | 10                             | ESC pin                           |
+
+### Sensor parameters
+
+| Name                       | Type     | Value | Description                              |
+|----------------------------|----------|-------|------------------------------------------|
+| `MIN_VALID_DISTANCE`       | uint16_t | 50    | Minimum valid range (mm)                 |
+| `RELIABLE_RANGE`           | uint16_t | 4000  | Trusted measurement range (mm)           |
+| `L1X_TIMING_BUDGET_US`     | uint32_t | 33000 | VL53L1X measurement budget (us)          |
+| `L1X_INTER_MEASUREMENT_MS` | uint32_t | 40    | VL53L1X inter-measurement period (ms)    |
+
+### Loop timing
+
+| Name                   | Type           | Value | Description           |
+|------------------------|----------------|-------|-----------------------|
+| `MEASUREMENT_INTERVAL` | unsigned long  | 40    | Main loop period (ms) |
+
+### Steering
+
+| Name                 | Type  | Value | Description                |
+|----------------------|-------|-------|----------------------------|
+| `MAX_STEERING_ANGLE` | float | 30.0  | Max steering angle (deg)   |
+
+### Pure Pursuit
+
+| Name                  | Type  | Value  | Description                                         |
+|-----------------------|-------|--------|-----------------------------------------------------|
+| `WHEELBASE_MM`        | float | 210.0  | Wheelbase (mm)                                      |
+| `LOOKAHEAD_OFFSET_MM` | float | 1200.0 | Ld offset (mm). Tuned manually.                     |
+
+### Gap detection
+
+| Name                  | Type  | Value | Description                                            |
+|-----------------------|-------|-------|--------------------------------------------------------|
+| `FARTHEST_HYSTERESIS` | float | 100.0 | Hysteresis for switching the farthest sensor (mm)      |
+
+Hysteresis behavior:
+- The farthest sensor only changes when a new candidate beats the current one by at least 100mm.
+- Prevents flapping when readings hover around each other.
+
+### Safety
+
+| Name                        | Type     | Value | Description                          |
+|-----------------------------|----------|-------|--------------------------------------|
+| `EMERGENCY_FRONT_THRESHOLD` | uint16_t | 400   | Front emergency-stop threshold (mm)  |
+
+### Servo (us)
+
+| Name           | Type     | Value | Description           |
+|----------------|----------|-------|-----------------------|
+| `SERVO_CENTER` | uint16_t | 1415  | Center                |
+| `SERVO_MIN`    | uint16_t | 1115  | Min pulse (full right)|
+| `SERVO_MAX`    | uint16_t | 1715  | Max pulse (full left) |
+
+### ESC (us)
+
+| Name          | Type     | Value | Description |
+|---------------|----------|-------|-------------|
+| `ESC_STOP_US` | uint16_t | 1500  | Stop        |
+| `ESC_MIN_US`  | uint16_t | 1000  | Min pulse   |
+| `ESC_MAX_US`  | uint16_t | 2000  | Max pulse   |
+
+### Cruise speed
+
+| Name       | Type     | Value | Description                    |
+|------------|----------|-------|--------------------------------|
+| `SPEED_US` | uint16_t | 1680  | Cruise pulse width (us)        |
 
 ---
 
-## 使用方法
+## Hardware
 
-### 1. ライブラリのインストール
+- **MCU**: Arduino Nano R4
+- **Sensors**: VL53L1X ToF x 7
+- **I2C multiplexer**: TCA9548A
+- **Steering**: hobby servo
+- **Drive**: ESC + brushless motor
 
-Arduino IDEで以下をインストール:
+### Wiring
+
+| From            | To                       |
+|-----------------|--------------------------|
+| Arduino SDA     | TCA9548A SDA             |
+| Arduino SCL     | TCA9548A SCL             |
+| TCA9548A CH0-6  | VL53L1X x 7              |
+| Arduino pin 9   | Steering servo signal    |
+| Arduino pin 10  | ESC signal               |
+
+---
+
+## Usage
+
+### 1. Install libraries
+
+In the Arduino IDE, install:
 - **VL53L1X** (Pololu)
-- **Servo** (Arduino標準)
+- **Servo** (Arduino built-in)
 
-### 2. 設定
+### 2. Configure
 
-`Config.h` の `RUN_MODE` を設定:
-- `MODE_DEBUG`: デバッグモード（PWM無効、シリアル出力有効）
-- `MODE_PRODUCTION`: 実機モード（PWM有効、シリアル出力無効）
-- `MODE_DEBUG_RUN`: デバッグ走行（PWM有効、シリアル出力有効）
+Set `RUN_MODE` in `Config.h`:
+- `MODE_DEBUG`: debug mode (PWM disabled, serial enabled)
+- `MODE_PRODUCTION`: race mode (PWM enabled, serial disabled)
+- `MODE_DEBUG_RUN`: debug run (PWM and serial enabled)
 
-### 3. 書き込み
+### 3. Flash
 
-Arduino IDEでArduino Nano R4に書き込み
+Upload the sketch to the Arduino Nano R4.
 
 ---
 
-## デバッグ出力フォーマット
+## Debug output
 
-RUN_MODE=MODE_DEBUG_RUN 時のシリアル出力例:
+Sample serial output when `RUN_MODE=MODE_DEBUG_RUN`:
 
 ```
 S0:1234 | S1:567 | S2:890 | S3:456 | S4:789 | S5:321 | S6:654 | T:15.0° Ld:600 St:13.5 RR | T:28000us(S:25000us)
 ```
 
-| フィールド | 説明 |
-|-----------|------|
-| S0-S6 | 各センサーの距離（mm） |
-| T | 目標角度（度） |
-| Ld | ルックアヘッド距離（mm） |
-| St | ステアリング角度（度） |
-| L/R | ステアリング方向インジケーター |
-| T | ループ時間（μs） |
+| Field  | Description                          |
+|--------|--------------------------------------|
+| S0-S6  | Distance per sensor (mm)             |
+| T      | Target angle (deg)                   |
+| Ld     | Lookahead distance (mm)              |
+| St     | Steering angle (deg)                 |
+| L/R    | Steering-direction indicator         |
+| T      | Loop time (us)                       |
 
 ---
 
-## 安全機能
+## Safety
 
-1. **緊急停止**: 前方センサー < 400mm で自動停止
+1. **Emergency stop**: stops automatically when the front sensor reads under 400mm.

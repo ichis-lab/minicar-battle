@@ -1,25 +1,21 @@
 /*
  * GapFinder.cpp
  *
- * 最遠+隣接センサー方式によるギャップ検出（実装）
+ * Algorithm:
+ * 1. Pick the farthest valid sensor (with hysteresis to avoid flapping).
+ * 2. Look at its left/right neighbors when available.
+ * 3. With both neighbors: weight each neighbor by the area of the triangle
+ *    it forms with the farthest sensor, and take the area-weighted angle.
+ *    With one neighbor (or none): fall back to a distance-weighted angle.
  *
- * アルゴリズム概要:
- * 1. 有効な7センサーから距離が最も遠い1つを選択（ヒステリシス付き）
- * 2. その隣接センサー（左右）を取得（端の場合は片側のみ）
- * 3. 三角形面積按分で目標角度を計算（両側隣接あり）
- *    または距離重み付けで計算（片側のみ）
+ * Triangle areas (the 1/2 cancels in the ratio, so it is omitted):
+ *   area_left  = d_left  * d_farthest * sin(angle gap to left)
+ *   area_right = d_right * d_farthest * sin(angle gap to right)
+ *   target = (angle_left * area_left + angle_right * area_right) /
+ *            (area_left + area_right)
  *
- * 三角形面積按分:
- * - 左三角形面積 = d_left × d_farthest × sin(角度差)
- * - 右三角形面積 = d_farthest × d_right × sin(角度差)
- * - target = (左角度 × 左面積 + 右角度 × 右面積) / (左面積 + 右面積)
- *
- * 状態保持:
- * - _lastFarthestIdx: 前回の最遠センサーインデックス
- *   毎ループ更新され、次回のヒステリシス判定に使用
- *   センサーノイズや微小な距離変動による頻繁な切り替えを防止
- *
- * 注: Ld（ルックアヘッド距離）はSteeringControllerで正面センサー距離から計算
+ * Note: Ld (the lookahead distance) is computed in SteeringController from
+ * the front sensor reading, not here.
  */
 
 #include "GapFinder.h"
@@ -29,7 +25,7 @@
 GapFinder::GapFinder() : _lastFarthestIdx(FRONT_SENSOR_INDEX) {}
 
 // ============================================================================
-// プライベートメソッド
+// Private
 // ============================================================================
 
 int GapFinder::_findFarthestSensor(const SensorData* data,
@@ -53,18 +49,17 @@ int GapFinder::_applyHysteresis(const SensorData* data, int candidateIdx,
     int result_idx = candidateIdx;
     float result_dist = candidateDist;
 
-    // 前回の最遠センサーが有効で、新しい最遠との差がヒステリシス未満なら切り替えない
+    // Keep the previous farthest sensor if the new candidate is not enough farther.
     if (_lastFarthestIdx >= 0 && _lastFarthestIdx < NUM_SENSORS &&
         data[_lastFarthestIdx].valid && candidateIdx != _lastFarthestIdx) {
         float diff = candidateDist - data[_lastFarthestIdx].distance;
         if (diff < FARTHEST_HYSTERESIS) {
-            // 切り替えない：前回の最遠センサーを維持
             result_idx = _lastFarthestIdx;
             result_dist = data[_lastFarthestIdx].distance;
         }
     }
 
-    // 状態を更新
+    // Update state for the next call.
     _lastFarthestIdx = result_idx;
     outDistance = result_dist;
     return result_idx;
@@ -72,7 +67,6 @@ int GapFinder::_applyHysteresis(const SensorData* data, int candidateIdx,
 
 float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
                                       float farthestDist) const {
-    // 隣接センサーのインデックスを決定
     int left_idx = (farthestIdx > 0) ? farthestIdx - 1 : -1;
     int right_idx = (farthestIdx < NUM_SENSORS - 1) ? farthestIdx + 1 : -1;
 
@@ -80,14 +74,13 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
     bool has_right = (right_idx >= 0 && data[right_idx].valid);
 
     if (has_left && has_right) {
-        // 両側に隣接センサーあり: 三角形面積按分
-        // 面積 = d1 × d2 × sin(角度差)、(1/2)は比率計算で消えるので省略
+        // Both neighbors valid: triangle-area weighting.
         float angle_diff_left =
             fabs(SENSOR_ANGLES[farthestIdx] - SENSOR_ANGLES[left_idx]);
         float angle_diff_right =
             fabs(SENSOR_ANGLES[right_idx] - SENSOR_ANGLES[farthestIdx]);
 
-        // sin値は事前計算済み定数を使用（15度または20度）
+        // Use the precomputed sin values (15 deg or 20 deg).
         float sin_left = (angle_diff_left < 17.5f) ? SIN_15_DEG : SIN_20_DEG;
         float sin_right = (angle_diff_right < 17.5f) ? SIN_15_DEG : SIN_20_DEG;
 
@@ -96,13 +89,13 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 
         float total_area = area_left + area_right;
         if (total_area < 0.001f) {
-            // ゼロ除算防止: 最遠センサーの角度を返す
+            // Avoid divide-by-zero; fall back to the farthest sensor's angle.
             return SENSOR_ANGLES[farthestIdx];
         }
         return (SENSOR_ANGLES[left_idx] * area_left +
                 SENSOR_ANGLES[right_idx] * area_right) / total_area;
     } else {
-        // 片側のみ or 隣接なし: 距離重み付け
+        // One side or zero neighbors: distance-weighted average.
         float weighted_sum = SENSOR_ANGLES[farthestIdx] * farthestDist;
         float weight_total = farthestDist;
 
@@ -116,7 +109,7 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
         }
 
         if (weight_total < 0.001f) {
-            // ゼロ除算防止: 最遠センサーの角度を返す
+            // Avoid divide-by-zero; fall back to the farthest sensor's angle.
             return SENSOR_ANGLES[farthestIdx];
         }
         return weighted_sum / weight_total;
@@ -124,26 +117,26 @@ float GapFinder::_calculateTargetAngle(const SensorData* data, int farthestIdx,
 }
 
 // ============================================================================
-// パブリックメソッド
+// Public
 // ============================================================================
 
 GapResult GapFinder::find(const SensorData* data) {
     GapResult result = {0.0f};
 
-    // Step 1: 最も遠いセンサーを見つける
+    // Step 1: pick the farthest sensor.
     float farthest_dist;
     int farthest_idx = _findFarthestSensor(data, farthest_dist);
 
-    // 有効なセンサーがない場合は直進
+    // No valid sensor -> drive straight.
     if (farthest_idx < 0) {
         return result;
     }
 
-    // Step 2: ヒステリシス処理を適用
+    // Step 2: hysteresis.
     farthest_idx = _applyHysteresis(data, farthest_idx, farthest_dist,
                                    farthest_dist);
 
-    // Step 3: 目標角度を計算
+    // Step 3: target angle.
     result.target_angle = _calculateTargetAngle(data, farthest_idx,
                                                farthest_dist);
 

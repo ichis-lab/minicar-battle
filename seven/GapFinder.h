@@ -1,13 +1,15 @@
 /*
  * GapFinder.h
  *
- * 最遠+隣接センサー方式によるギャップ検出
- * 最も遠いセンサーとその隣接センサーの距離重み付けで目標角度を決定
+ * Finds the steering target by combining the farthest sensor with its neighbors.
+ * The target angle is computed by triangle-area weighting when both neighbors
+ * are valid, and falls back to distance weighting otherwise. See GapFinder.cpp
+ * for details.
  *
- * 状態保持:
- * - _lastFarthestIdx: 前回の最遠センサーインデックス
- *   ヒステリシス処理により、センサー切り替えの頻繁な振動を防止
- *   新しいセンサーが FARTHEST_HYSTERESIS (mm) 以上遠い場合のみ切り替え
+ * State:
+ * - _lastFarthestIdx: the previous farthest-sensor index. Used by the
+ *   hysteresis check so that a new sensor only wins when it is at least
+ *   FARTHEST_HYSTERESIS (mm) farther than the previous one.
  */
 
 #ifndef GAP_FINDER_H
@@ -18,30 +20,30 @@
 #include "Config.h"
 #include "SensorReader.h"
 
-// ギャップ検出結果構造体
+// Output of GapFinder::find.
 struct GapResult {
-    float target_angle;  // 目標方向角度（度）正=右、負=左
+    float target_angle;  // target heading (deg); positive = right, negative = left
 };
 
 class GapFinder {
    private:
-    int _lastFarthestIdx;  // 前回の最遠センサーインデックス（ヒステリシス用）
+    int _lastFarthestIdx;  // previous farthest-sensor index (for hysteresis)
 
-    // 最も遠いセンサーを見つける（ヒステリシス適用前）
+    // Pick the farthest sensor before applying hysteresis.
     int _findFarthestSensor(const SensorData* data, float& outDistance) const;
 
-    // ヒステリシス処理を適用し、最終的な最遠センサーを決定
+    // Apply hysteresis and return the final farthest-sensor index.
     int _applyHysteresis(const SensorData* data, int candidateIdx,
                          float candidateDist, float& outDistance);
 
-    // 最遠センサーと隣接センサーから目標角度を計算
+    // Compute the target angle from the farthest sensor and its neighbors.
     float _calculateTargetAngle(const SensorData* data, int farthestIdx,
                                 float farthestDist) const;
 
    public:
     GapFinder();
 
-    // メイン処理: センサーデータから目標角度を決定
+    // Main entry point: turn sensor data into a target angle.
     GapResult find(const SensorData* sensorData);
 };
 

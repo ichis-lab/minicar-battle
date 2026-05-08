@@ -1,293 +1,293 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working with this repository.
 
-## Project Overview
+## Project overview
 
-自動運転ミニカーバトルプロジェクト - Tamiya TT-02シャーシを使った競技用自動運転システムの開発。
+An autonomous-driving project for a competition mini car based on the Tamiya TT-02 chassis.
 
-**ハードウェア制御システム** (`seven/`) - Arduino Nano R4 + VL53L1X ToFセンサー7個による自動走行システム
+**Hardware control system** (`seven/`): the autonomous driving stack on Arduino Nano R4 with seven VL53L1X ToF sensors.
 
-### 競技目標
-- **タイムトライアル**: 9秒以下のラップタイムを目指す
-- **エンデュランス**: 6分間の連続周回レース（壁衝突なし、チェックポイント順番通過）
+### Race goals
+- **Time trial**: lap time below 9 seconds.
+- **Endurance**: continuous racing for 6 minutes (no wall hits, checkpoints in order).
 
-### 競技結果
-- **決勝**: 3周17.5秒（優勝）
+### Race result
+- **Final**: 3 laps in 17.5s (1st place).
 
-## Repository Structure
+## Repository structure
 
 ```
 minicar-battle/
-├── seven/                           # Arduino自動走行システム
-│   ├── seven.ino                   # メインスケッチ（エントリーポイント）
-│   ├── Config.h                    # 全設定値の一元管理
-│   ├── SensorReader.cpp/h          # VL53L1Xセンサー読み取り
-│   ├── GapFinder.cpp/h             # 最遠+隣接センサー方式による目標角度決定
-│   ├── SteeringController.cpp/h    # Pure Pursuit制御によるステアリング計算
-│   ├── Actuator.cpp/h              # サーボ・ESCへのPWM出力
-│   └── Logger.h                    # デバッグ出力（ヘッダーオンリー）
-├── CLAUDE.md                       # 本ドキュメント
-├── README.md                       # プロジェクト詳細ドキュメント
-└── LICENSE                         # MITライセンス
+├── seven/                           # Arduino autonomous driving stack
+│   ├── seven.ino                   # main sketch (entry point)
+│   ├── Config.h                    # all tunables and constants
+│   ├── SensorReader.cpp/h          # VL53L1X reads
+│   ├── GapFinder.cpp/h             # target angle from farthest sensor + neighbors
+│   ├── SteeringController.cpp/h    # steering via Pure Pursuit
+│   ├── Actuator.cpp/h              # servo/ESC PWM output
+│   └── Logger.h                    # debug logger (header-only)
+├── CLAUDE.md                       # this file
+├── README.md                       # detailed project documentation
+└── LICENSE                         # MIT
 ```
 
 ---
 
-## System Architecture
+## System architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                       Arduino Nano R4                            │
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
-│  │ SensorReader │───▶│  GapFinder   │───▶│ SteeringController│   │
-│  │  (I2C読取)   │    │(目標角度決定) │    │  (Pure Pursuit)   │   │
-│  └──────────────┘    └──────────────┘    └────────┬─────────┘   │
-│                                                   │             │
-│  ┌──────────────┐      ┌─────────────────────────▼──────┐      │
-│  │  TCA9548A    │      │            Actuator             │      │
-│  │ マルチプレクサ│      │    (PWM出力 + 定速走行)         │      │
-│  └──────────────┘      └──────────────────────────────────┘      │
-└───────┬──────────────────────────────────────────┬───────────────┘
-        │                                          │
-   ┌────┴────┐                               ┌─────┴─────┐
-   │ VL53L1X │ × 7                           │サーボ/ESC │
-   └─────────┘                               └───────────┘
++------------------------------------------------------------------+
+|                       Arduino Nano R4                            |
+|                                                                  |
+|  +--------------+    +--------------+    +-------------------+   |
+|  | SensorReader |--->|  GapFinder   |--->| SteeringController|   |
+|  |  (I2C read)  |    | (target deg) |    |  (Pure Pursuit)   |   |
+|  +--------------+    +--------------+    +---------+---------+   |
+|                                                    |             |
+|  +--------------+      +---------------------------v--------+    |
+|  |  TCA9548A    |      |            Actuator                |    |
+|  |  multiplexer |      |     (PWM out + cruise control)     |    |
+|  +--------------+      +-------------------------------------+   |
++-------+--------------------------------------+-------------------+
+        |                                      |
+   +----+----+                            +----+-----+
+   | VL53L1X | x 7                        | servo/ESC|
+   +---------+                            +----------+
 ```
 
-### Hardware Requirements
+### Hardware requirements
 
-- **マイコン**: Arduino Nano R4
-- **センサー**: VL53L1X ToFセンサー × 7
-- **I2Cマルチプレクサ**: TCA9548A（アドレス: 0x70）
-- **アクチュエーター**: サーボモーター（ステアリング）、ESC（速度制御）
+- **MCU**: Arduino Nano R4
+- **Sensors**: VL53L1X ToF x 7
+- **I2C multiplexer**: TCA9548A (address 0x70)
+- **Actuators**: hobby servo (steering) and ESC (drive)
 
-### Sensor Layout
+### Sensor layout
 
 ```
-                   正面 (Sensor 3: 0°)
-                         │
-              -15°       │       +15°
-               (S2)      │      (S4)
-         -30°     \      │      /     +30°
-          (S1)     \     │     /     (S5)
-    -60°            \    │    /            +60°
-  (Sensor 0)             │             (Sensor 6)
-     左                   │                   右
+                   front (Sensor 3: 0deg)
+                         |
+              -15deg     |     +15deg
+               (S2)      |      (S4)
+         -30deg   \      |      /   +30deg
+          (S1)     \     |     /     (S5)
+    -60deg          \    |    /          +60deg
+  (Sensor 0)             |             (Sensor 6)
+     left                |                   right
 ```
 
-| センサー | チャンネル | 角度 | 役割 |
-|---------|-----------|------|------|
-| Sensor 0 | CH0 | -60° | 左側方 |
-| Sensor 1 | CH1 | -30° | 左斜め前 |
-| Sensor 2 | CH2 | -15° | 左前方 |
-| Sensor 3 | CH3 | 0° | 正面 |
-| Sensor 4 | CH4 | +15° | 右前方 |
-| Sensor 5 | CH5 | +30° | 右斜め前 |
-| Sensor 6 | CH6 | +60° | 右側方 |
+| Sensor   | Channel | Angle  | Role          |
+|----------|---------|--------|---------------|
+| Sensor 0 | CH0     | -60deg | left side     |
+| Sensor 1 | CH1     | -30deg | left front    |
+| Sensor 2 | CH2     | -15deg | left forward  |
+| Sensor 3 | CH3     | 0deg   | front         |
+| Sensor 4 | CH4     | +15deg | right forward |
+| Sensor 5 | CH5     | +30deg | right front   |
+| Sensor 6 | CH6     | +60deg | right side    |
 
 ---
 
-## Control Algorithm: Follow the Gap + Pure Pursuit
+## Control algorithm: Follow-the-Gap + Pure Pursuit
 
-### 最遠+隣接センサー方式（GapFinder）
+### Farthest-sensor + neighbors method (GapFinder)
 
-1. 有効な7センサーから距離が最も遠い1つを選択（ヒステリシス付き）
-2. その隣接センサー（左右）を取得（端の場合は片側のみ）
-3. 最遠センサー+隣接センサーの距離で重み付けした角度をtarget_angleとする
+1. Pick the farthest valid sensor out of the 7 (with hysteresis).
+2. Take its left/right neighbors when available (only one side at the array ends).
+3. Distance-weight the farthest sensor and its neighbors to get target_angle.
 
-### Pure Pursuit制御（SteeringController）
-
-```
-steering_angle = atan2(2 × L × sin(α), Ld)
-```
-
-- **L**: ホイールベース（mm）- MF-01X = 210mm
-- **α**: 目標点への角度（ラジアン）- GapFinderのtarget_angle
-- **Ld**: ルックアヘッド距離（mm）- **正面センサー(S3)の距離 - 車体長(1200mm)**
-
-### 制御フロー
+### Pure Pursuit (SteeringController)
 
 ```
-1. センサーデータ取得（7センサー同時読み取り）
-      ↓
-2. 緊急停止チェック（前方 < 400mm）
-      ↓
-3. 最遠センサー特定 + 隣接センサーで目標角度計算（GapFinder）
-      ↓
-4. Ld = 正面センサー距離 - 車体長（SteeringController）
-      ↓
-5. Pure Pursuitでステアリング角度を決定
-      ↓
-6. PWM出力（サーボ + ESC定速）
+steering_angle = atan2(2 * L * sin(alpha), Ld)
+```
+
+- **L**: wheelbase (mm). MF-01X = 210mm.
+- **alpha**: angle to the target point (rad). Comes from GapFinder.target_angle.
+- **Ld**: lookahead distance (mm). **Front sensor (S3) distance minus body length (1200mm).**
+
+### Control flow
+
+```
+1. read sensors (7 sensors per cycle)
+      v
+2. emergency-stop check (front < 400mm)
+      v
+3. pick the farthest sensor and compute target angle (GapFinder)
+      v
+4. Ld = front sensor distance - body length (SteeringController)
+      v
+5. derive steering angle via Pure Pursuit
+      v
+6. PWM out (servo + ESC cruise)
 ```
 
 ---
 
-## Running the System
+## Running the system
 
-### 1. ライブラリのインストール
+### 1. Install libraries
 
-Arduino IDEで以下をインストール:
+In the Arduino IDE, install:
 - **VL53L1X** (Pololu)
-- **Servo** (Arduino標準)
+- **Servo** (Arduino built-in)
 
-### 2. 設定
+### 2. Configure
 
-`Config.h` の `RUN_MODE` を設定:
+Pick a `RUN_MODE` in `Config.h`:
 ```cpp
-#define MODE_DEBUG 0       // デバッグ専用（PWMなし、シリアルあり）
-#define MODE_PRODUCTION 1  // 本番走行（PWMあり、シリアルなし）
-#define MODE_DEBUG_RUN 2   // デバッグ走行（PWMあり、シリアルあり）
+#define MODE_DEBUG 0       // debug only (no PWM, serial enabled)
+#define MODE_PRODUCTION 1  // race run (PWM enabled, serial disabled)
+#define MODE_DEBUG_RUN 2   // debug run (PWM and serial enabled)
 
-#define RUN_MODE MODE_PRODUCTION  // ← ここで動作モードを選択
+#define RUN_MODE MODE_PRODUCTION  // pick the run mode here
 ```
 
-### 3. 書き込み
+### 3. Flash
 
 ```bash
-# Arduino CLIを使用する場合
+# With Arduino CLI
 arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi seven
 arduino-cli upload -p /dev/cu.usbmodem* --fqbn arduino:renesas_uno:unor4wifi seven
 ```
 
 ---
 
-## Key Configuration Parameters
+## Key configuration parameters
 
-`seven/Config.h` で設定:
+In `seven/Config.h`:
 
 ```cpp
-// タイミング設定
-const unsigned long MEASUREMENT_INTERVAL = 40;  // メインループ周期（ms）
+// Loop timing
+const unsigned long MEASUREMENT_INTERVAL = 40;  // main loop period (ms)
 
-// Pure Pursuitパラメータ
-const float WHEELBASE_MM = 210.0;       // ホイールベース（mm）- MF-01X
-const float LOOKAHEAD_OFFSET_MM = 1200.0;    // 車体長（mm）- センサー位置〜後輪軸
+// Pure Pursuit
+const float WHEELBASE_MM = 210.0;            // wheelbase (mm), MF-01X
+const float LOOKAHEAD_OFFSET_MM = 1200.0;    // body length (mm), sensor mount to rear axle
 
-// 安全パラメータ
-const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // 前方緊急閾値（mm）
+// Safety
+const uint16_t EMERGENCY_FRONT_THRESHOLD = 400;  // front emergency threshold (mm)
 
-// 速度設定（定速走行）
-const uint16_t SPEED_US = 1680;  // 走行速度パルス（μs）
+// Cruise speed
+const uint16_t SPEED_US = 1680;  // cruise pulse (us)
 
-// サーボ設定（μs単位）
-const uint16_t SERVO_CENTER = 1415;  // 中央位置
-const uint16_t SERVO_MIN = 1115;     // 最小パルス幅（右）
-const uint16_t SERVO_MAX = 1715;     // 最大パルス幅（左）
+// Servo (us)
+const uint16_t SERVO_CENTER = 1415;  // center
+const uint16_t SERVO_MIN = 1115;     // min pulse (full right)
+const uint16_t SERVO_MAX = 1715;     // max pulse (full left)
 ```
 
 ---
 
-## Debug Output Format
+## Debug output format
 
-`RUN_MODE=MODE_DEBUG_RUN` 時のシリアル出力例:
+Sample serial output when `RUN_MODE=MODE_DEBUG_RUN`:
 
 ```
 S0:1234 | S1:567 | S2:890 | S3:456 | S4:789 | S5:321 | S6:654 | T:15.0° Ld:600 St:13.5 RR | T:28000us(S:25000us)
 ```
 
-| フィールド | 説明 |
-|-----------|------|
-| S0-S6 | 各センサーの距離（mm） |
-| T | 目標角度（度） |
-| Ld | ルックアヘッド距離（mm） |
-| St | ステアリング角度（度） |
-| L/R | ステアリング方向インジケーター |
-| T | ループ時間（μs） |
+| Field  | Description                       |
+|--------|-----------------------------------|
+| S0-S6  | Distance per sensor (mm)          |
+| T      | Target angle (deg)                |
+| Ld     | Lookahead distance (mm)           |
+| St     | Steering angle (deg)              |
+| L/R    | Steering-direction indicator      |
+| T      | Loop time (us)                    |
 
 ---
 
-## Safety Features
+## Safety features
 
-1. **緊急停止**: 前方センサー < 400mm で自動停止
-
----
-
-## Common Issues
-
-**Q: センサーが初期化できない**
-→ I2C接続確認、TCA9548Aのアドレス（0x70）確認、VL53L1Xの電源確認
-
-**Q: サーボやESCが動かない**
-→ `RUN_MODE` が `MODE_PRODUCTION` または `MODE_DEBUG_RUN` になっているか確認
-→ ESCキャリブレーション実行
-
-**Q: ステアリングが逆方向**
-→ `Config.h` の `SERVO_MIN` / `SERVO_MAX` を入れ替え
+1. **Emergency stop**: stops automatically when the front sensor reads under 400mm.
 
 ---
 
-## Collaboration Guidelines（対話時のガイドライン）
+## Common issues
 
-このプロジェクトでは、以下の観点を対話の中で自然に確認・促進すること。
+**Q: a sensor fails to initialize**
+-> check the I2C wiring, the TCA9548A address (0x70), and VL53L1X power.
 
-### 1. 変更前の影響シーン確認
+**Q: the servo or ESC does not move**
+-> confirm `RUN_MODE` is `MODE_PRODUCTION` or `MODE_DEBUG_RUN`.
+-> run ESC calibration.
 
-パラメータやアルゴリズムの変更を提案・実装する前に、以下の3シーンへの影響を確認する：
+**Q: steering goes the wrong way**
+-> swap `SERVO_MIN` and `SERVO_MAX` in `Config.h`.
 
-| シーン | 確認ポイント |
-|--------|-------------|
-| **直線** | 蛇行が増えないか？ |
-| **緩カーブ** | スムーズに曲がれるか？ |
-| **急カーブ（S字）** | アンダーステアが出ないか？ |
+---
 
-**促し方の例**:
-- 「この変更は直線走行にも影響しますが、蛇行が増える可能性はありませんか？」
-- 「S字コーナーでの挙動も確認しておきましょうか？」
+## Collaboration guidelines
 
-### 2. 却下理由の記録促進
+These notes apply when iterating on this project.
 
-試行したパラメータや施策が却下された場合、その理由をConfig.hにコメントとして残すことを促す：
+### 1. Check the impact scenes before changing parameters
+
+Before proposing or implementing a parameter or algorithm change, walk through how it affects the three driving scenes below:
+
+| Scene          | What to check                              |
+|----------------|--------------------------------------------|
+| **Straight**   | Does it add yaw oscillation?               |
+| **Soft turn**  | Does it still corner smoothly?             |
+| **Hard turn (S-curve)** | Does it understeer or push wide? |
+
+Sample prompts:
+- "This change affects straight-line behavior too. Are we sure it will not add oscillation?"
+- "Should we also walk through the S-curve case before testing?"
+
+### 2. Record why a setting was rejected
+
+When a parameter or approach is tried and rejected, capture the reason as a comment in `Config.h`:
 
 ```cpp
-// 却下履歴:
-// LD_OFFSET = 1200: 却下（直線蛇行増加、2025-01-25）
-// LD_OFFSET = 1050: 採用（3周18.53秒、S字改善）
+// History:
+// LD_OFFSET = 1200: rejected (more straight-line oscillation, 2025-01-25)
+// LD_OFFSET = 1050: adopted (3 laps in 18.53s, better S-curves)
 ```
 
-**促し方の例**:
-- 「この設定値を試した結果と理由をConfig.hにコメントで残しておきますか？」
-- 「将来の参考のため、却下理由を記録しておきましょう」
+Sample prompts:
+- "Want to leave a note in `Config.h` with the result and why?"
+- "Worth recording the rejection reason for future reference."
 
-### 3. 評価軸の明示化
+### 3. Make the evaluation axes explicit
 
-複数の施策を比較検討する際は、評価軸を明確にするよう促す：
+When comparing approaches, surface the axes you are weighing:
 
-| 評価軸 | 説明 |
-|--------|------|
-| **タイム** | ラップタイムへの影響（秒） |
-| **安定性** | 蛇行・壁衝突のリスク |
-| **実装コスト** | 変更の複雑さ・リスク |
+| Axis              | What it covers                                |
+|-------------------|-----------------------------------------------|
+| **Lap time**      | Effect on lap time (seconds)                  |
+| **Stability**     | Risk of yaw oscillation or wall hits          |
+| **Cost / risk**   | Implementation effort and rollback risk       |
 
-**促し方の例**:
-- 「タイム改善と安定性のどちらを優先しますか？」
-- 「この施策の評価軸を整理しましょう：タイム/安定性/コストの観点では...」
+Sample prompts:
+- "Are we optimizing for lap time or for stability here?"
+- "Let's lay out the axes: time / stability / cost."
 
-### 4. 変更レベルの分類
+### 4. Classify the change level
 
-提案する変更のインパクトレベルを意識する：
+Be explicit about the size of the proposed change:
 
-| レベル | 内容 | 対応 |
-|--------|------|------|
-| **L1** | 単一パラメータ調整 | 即テスト可 |
-| **L2** | アルゴリズム修正 | 影響範囲確認後テスト |
-| **L3** | アーキテクチャ変更 | 費用対効果分析先行 |
+| Level | Scope                       | Process                                |
+|-------|-----------------------------|----------------------------------------|
+| **L1**| Single-parameter tweak      | Test directly                          |
+| **L2**| Algorithm tweak             | Verify impact across modules first     |
+| **L3**| Architectural change        | Cost-benefit analysis first            |
 
-**促し方の例**:
-- 「これはL2（アルゴリズム修正）なので、GapFinderとSteeringControllerの両方への影響を確認しましょう」
-- 「L3レベルの変更なので、まず費用対効果を分析しますか？」
+Sample prompts:
+- "This is L2 (algorithm tweak), so let's check both GapFinder and SteeringController first."
+- "L3 territory. Want to do a cost-benefit pass before starting?"
 
 ---
 
-## Branch Strategy
+## Branch strategy
 
-- `main` - メインブランチ（プロダクション）
-- `feat/*` - 新機能開発用ブランチ
+- `main`: main branch (production).
+- `feat/*`: feature branches.
 
 ---
 
 ## Language
 
-コードベース、コメント、ドキュメントは日本語で記述。新しいコードやコメントも日本語を使用すること。
+Code, comments, and documentation are written in English. Conversational replies in chat may be in Japanese.

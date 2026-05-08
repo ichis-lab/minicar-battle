@@ -1,8 +1,8 @@
 /*
  * Logger.h
  *
- * デバッグ出力管理（ヘッダーオンリー）
- * DEBUG_MODEに応じてシリアル出力を制御
+ * Header-only debug logger.
+ * Serial output is gated on RUN_MODE (see Config.h).
  */
 
 #ifndef LOGGER_H
@@ -13,21 +13,21 @@
 #include "Config.h"
 
 // ============================================================================
-// デバッグモードに応じたシリアル出力制御
+// Serial output, conditional on the run mode.
 // ============================================================================
 class Logger {
    public:
-    // シリアル初期化
+    // Open the serial port.
     static void begin(unsigned long baud = 9600) {
 #if ENABLE_SERIAL
         Serial.begin(baud);
         while (!Serial) {
             delay(10);
-        }  // シリアル接続待ち
+        }  // wait for the serial connection
 #endif
     }
 
-    // 汎用プリント（改行なし）
+    // Generic print, no newline.
     template <typename T>
     static void print(const T& value) {
 #if ENABLE_SERIAL
@@ -35,14 +35,14 @@ class Logger {
 #endif
     }
 
-    // float出力（小数点以下桁数指定）
+    // Float print with explicit precision.
     static void print(float value, int decimals) {
 #if ENABLE_SERIAL
         Serial.print(value, decimals);
 #endif
     }
 
-    // 汎用プリント（改行あり）
+    // Generic println.
     template <typename T>
     static void println(const T& value) {
 #if ENABLE_SERIAL
@@ -50,14 +50,14 @@ class Logger {
 #endif
     }
 
-    // 改行のみ（引数なし版）
+    // Bare newline.
     static void println() {
 #if ENABLE_SERIAL
         Serial.println();
 #endif
     }
 
-    // センサーデータのコンパクト表示
+    // Compact one-sensor reading.
     static void printSensorData(uint8_t channel, uint16_t distance,
                                 bool valid) {
         print("S");
@@ -70,7 +70,7 @@ class Logger {
         }
     }
 
-    // ギャップ検出結果の表示
+    // Gap-detection result.
     static void printGapResult(float targetAngle, float targetDistance) {
         print(" | T:");
         print(targetAngle, 1);
@@ -78,28 +78,27 @@ class Logger {
         print((int)targetDistance);
     }
 
-    // ステアリング角度の表示（視覚的インジケーター付き）
+    // Steering angle, with a small visual indicator.
     static void printSteering(float angle) {
         print(" St:");
         print(angle, 1);
         print(" ");
 
-        // 視覚的インジケーター
         if (angle < -5.0) {
-            // 左に大きく切る
+            // Hard left.
             int bars = constrain((int)(-angle / 5), 1, 6);
             for (int i = 0; i < bars; ++i) print("L");
         } else if (angle > 5.0) {
-            // 右に大きく切る
+            // Hard right.
             int bars = constrain((int)(angle / 5), 1, 6);
             for (int i = 0; i < bars; ++i) print("R");
         } else {
-            // ほぼ中央
+            // Roughly centered.
             print("|");
         }
     }
 
-    // アクチュエーター情報の表示
+    // Actuator state.
     static void printActuator(const char* name, uint16_t pulse_us) {
         print(" [");
         print(name);
@@ -108,7 +107,7 @@ class Logger {
         print("]");
     }
 
-    // ループタイミング情報の表示（μs単位）
+    // Loop timing in microseconds.
     static void printLoopTiming(unsigned long loop_us, unsigned long sensor_us) {
         print(" | T:");
         print(loop_us);
@@ -117,7 +116,7 @@ class Logger {
         print("us)");
     }
 
-    // タイミング設定のサマリー表示
+    // Timing-config summary.
     static void printTimingConfig() {
         println("--- Timing Configuration ---");
         print("  L1X Timing Budget: ");

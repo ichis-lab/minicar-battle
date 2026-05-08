@@ -1,7 +1,7 @@
 /*
  * SensorReader.cpp
  *
- * センサー読み取りクラス（実装）
+ * VL53L1X reads through the TCA9548A multiplexer.
  */
 
 #include "SensorReader.h"
@@ -9,7 +9,7 @@
 #include "Logger.h"
 
 SensorReader::SensorReader() {
-    // 初期化
+    // Zero-initialize the cached readings.
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
         _sensorData[i].distance = 0;
         _sensorData[i].valid = false;
@@ -26,14 +26,13 @@ void SensorReader::_selectChannel(uint8_t channel) {
 
 bool SensorReader::begin() {
     Wire.begin();
-    Wire.setClock(400000);  // I2C高速モード（400kHz）
+    Wire.setClock(400000);  // I2C fast mode (400 kHz)
 
     Logger::println("=== VL53L1X Sensor Initialization ===");
 
-    // 各センサーを初期化
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
         _selectChannel(SENSOR_CHANNELS[i]);
-        delay(10);  // チャンネル切替後の安定待ち
+        delay(10);  // settle after switching channels
 
         Logger::print("Sensor ");
         Logger::print(i);
@@ -49,11 +48,11 @@ bool SensorReader::begin() {
             return false;
         }
 
-        // VL53L1X設定: 長距離モード、測定時間50ms
+        // Long range mode, configurable timing budget
         _sensors[i].setDistanceMode(VL53L1X::Long);
         _sensors[i].setMeasurementTimingBudget(L1X_TIMING_BUDGET_US);
 
-        // 連続測定モード開始
+        // Continuous ranging
         _sensors[i].startContinuous(L1X_INTER_MEASUREMENT_MS);
 
         Logger::println(" OK");
@@ -67,14 +66,13 @@ void SensorReader::readAll() {
     for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
         _selectChannel(SENSOR_CHANNELS[i]);
 
-        // VL53L1Xから読み取り（連続測定モード）
+        // Read in continuous mode
         _sensors[i].read();
 
-        // 距離データを取得
         _sensorData[i].distance = _sensors[i].ranging_data.range_mm;
 
-        if(_sensorData[i].distance > RELIABLE_RANGE) {
-            // VL53L1Xの信頼できる測定範囲を超えた場合は上限値にクランプ
+        if (_sensorData[i].distance > RELIABLE_RANGE) {
+            // Clamp to the upper trusted bound
             _sensorData[i].distance = RELIABLE_RANGE;
         }
         _sensorData[i].valid =

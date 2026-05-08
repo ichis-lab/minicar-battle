@@ -1,15 +1,12 @@
 /*
  * SteeringController.cpp
  *
- * ステアリング制御クラス（実装）
- * Follow the Gap + Pure Pursuit制御
+ * Pure Pursuit on the GapFinder target.
  *
- * 設計思想:
- * - GapFinderが検出した目標方向をPure Pursuit公式に適用
- * - 公式: steering = atan2(2 × L × sin(α), Ld)
- *   L: ホイールベース（mm）
- *   α: 目標点への角度（ラジアン）
- *   Ld: ルックアヘッド距離（mm）- 正面センサーの距離を使用
+ * Formula: steering = atan2(2 * L * sin(alpha), Ld)
+ *   L:     wheelbase (mm)
+ *   alpha: angle to the target point (rad)
+ *   Ld:    lookahead distance (mm) = front sensor distance - LOOKAHEAD_OFFSET_MM
  */
 
 #include "SteeringController.h"
@@ -19,34 +16,32 @@
 SteeringController::SteeringController() {}
 
 void SteeringController::begin() {
-    // Pure Pursuitはステートレスなので初期化処理なし
+    // Pure Pursuit is stateless; nothing to initialize.
 }
 
 float SteeringController::calculate(const GapResult& gap, const SensorData* sensorData) {
-    // GapFinderの出力を目標点の極座標として解釈
-    // α (alpha): 目標点への角度
-    // Ld: ルックアヘッド距離 - 正面センサーの距離を使用
+    // Treat GapFinder's output as the polar coordinates of the target point.
+    // alpha: angle to the target.
+    // Ld:    lookahead distance, derived from the front sensor.
 
     float alpha_deg = gap.target_angle;
 
-    // 正面センサーの距離からオフセットを引いてルックアヘッド距離とする
+    // Subtract the offset from the front sensor distance to get Ld.
     float Ld_mm = sensorData[FRONT_SENSOR_INDEX].valid
                   ? sensorData[FRONT_SENSOR_INDEX].distance - LOOKAHEAD_OFFSET_MM
-                  : 1000.0f;  // センサー無効時のフォールバック
+                  : 1000.0f;  // fallback when the front sensor is invalid
 
-    // ゼロ除算防止
+    // Avoid divide-by-zero / extreme values.
     if (Ld_mm < 50.0f) Ld_mm = 50.0f;
 
-    // 角度をラジアンに変換
     float alpha_rad = alpha_deg * DEG_TO_RAD;
 
-    // Pure Pursuit公式: δ = atan2(2 × L × sin(α), Ld)
+    // Pure Pursuit: delta = atan2(2 * L * sin(alpha), Ld)
     float steering_rad = atan2(2.0f * WHEELBASE_MM * sin(alpha_rad), Ld_mm);
 
-    // 度に変換
     float steering_deg = steering_rad * RAD_TO_DEG;
 
-    // 最大操舵角でクランプ
+    // Clamp to the mechanical limit.
     steering_deg = constrain(steering_deg, -MAX_STEERING_ANGLE, MAX_STEERING_ANGLE);
 
     return steering_deg;

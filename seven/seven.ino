@@ -1,24 +1,24 @@
 /*
  * seven.ino
  *
- * 7つのVL53L1Xセンサーを使った Follow the Gap + Pure Pursuit制御
+ * Follow-the-Gap + Pure Pursuit control over 7 VL53L1X sensors.
  *
- * 接続:
- * - TCA9548A I2Cマルチプレクサ (アドレス: 0x70)
- * - VL53L1Xセンサー → マルチプレクサのチャンネル0-6に接続
- * - サーボモーター → Pin 9
- * - ESC → Pin 10
+ * Wiring:
+ * - TCA9548A I2C multiplexer (address 0x70)
+ * - VL53L1X sensors connect to multiplexer channels 0-6
+ * - Steering servo on pin 9
+ * - ESC on pin 10
  *
- * 使用方法:
- * 1. Arduino IDEでこのファイルを開く
- * 2. 必要なライブラリをインストール:
+ * Usage:
+ * 1. Open this sketch in the Arduino IDE.
+ * 2. Install the required libraries:
  *    - VL53L1X (Pololu)
- *    - Servo (Arduino標準ライブラリ)
- * 3. Config.hでRUN_MODEを設定
- *    - MODE_DEBUG: デバッグ専用（PWMなし、シリアルあり）
- *    - MODE_PRODUCTION: 本番走行（PWMあり、シリアルなし）
- *    - MODE_DEBUG_RUN: デバッグ走行（PWMあり、シリアルあり）
- * 4. Arduino Nano R4に書き込み
+ *    - Servo (Arduino built-in)
+ * 3. Set RUN_MODE in Config.h:
+ *    - MODE_DEBUG: debug only (no PWM, serial enabled)
+ *    - MODE_PRODUCTION: race run (PWM enabled, serial disabled)
+ *    - MODE_DEBUG_RUN: debug run (PWM enabled, serial enabled)
+ * 4. Flash to an Arduino Nano R4.
  */
 
 #include "Actuator.h"
@@ -29,7 +29,7 @@
 #include "SteeringController.h"
 
 // ============================================================================
-// グローバルオブジェクト
+// Globals
 // ============================================================================
 SensorReader sensorReader;
 GapFinder gapFinder;
@@ -37,10 +37,10 @@ SteeringController steeringController;
 Actuator actuator;
 
 // ============================================================================
-// Setup関数
+// setup
 // ============================================================================
 void setup() {
-    // ロガー初期化（115200bpsで詳細データ表示）
+    // Logger init (115200 baud for detailed telemetry)
     Logger::begin(115200);
 
     Logger::println("==============================================");
@@ -63,11 +63,11 @@ void setup() {
     Logger::println("Lookahead: Front sensor distance");
     Logger::println();
 
-    // タイミング設定のサマリー表示
+    // Print timing config summary
     Logger::printTimingConfig();
     Logger::println();
 
-    // センサー初期化
+    // Sensor init
     if (!sensorReader.begin()) {
         Logger::println("ERROR: Sensor initialization failed!");
         while (1) {
@@ -75,13 +75,13 @@ void setup() {
         }
     }
 
-    // ステアリングコントローラー初期化
+    // Steering controller init
     steeringController.begin();
 
-    // アクチュエーター初期化
+    // Actuator init
     actuator.begin();
 
-    // ESCアーミング待ち
+    // Wait for ESC arming
     Logger::println("Waiting 3 seconds for ESC arming...");
     delay(3000);
 
@@ -91,7 +91,7 @@ void setup() {
 }
 
 // ============================================================================
-// Loop関数
+// loop
 // ============================================================================
 void loop() {
     static unsigned long lastMeasurement = 0;
@@ -99,13 +99,13 @@ void loop() {
     static bool firstRun = true;
     unsigned long currentTime = millis();
 
-    // 初回実行時にスタート時刻を記録
+    // Record start time on the first iteration
     if (firstRun) {
         startTime = currentTime;
         firstRun = false;
     }
 
-    // タイムアウト自動停止
+    // Auto-stop on timeout
     if (AUTO_STOP_SECONDS > 0 &&
         (currentTime - startTime) >= (AUTO_STOP_SECONDS * 1000UL)) {
         actuator.setSteering(0.0);
@@ -116,15 +116,15 @@ void loop() {
         }
     }
 
-    // 指定した間隔で測定・制御（固定周期を維持）
+    // Run measurement and control on a fixed cadence
     if (currentTime - lastMeasurement >= MEASUREMENT_INTERVAL) {
         lastMeasurement += MEASUREMENT_INTERVAL;
 
-        // タイミング計測開始
+        // Start loop timer
         unsigned long loopStartUs = micros();
 
         // =========================================================================
-        // Phase 1: センサーデータ取得
+        // Phase 1: read sensors
         // =========================================================================
         unsigned long sensorStartUs = micros();
         sensorReader.readAll();
@@ -133,7 +133,7 @@ void loop() {
 
         const SensorData* sensorData = sensorReader.getAllData();
 
-        // デバッグ: センサーデータ表示
+        // Debug: print sensor readings
         for (uint8_t i = 0; i < NUM_SENSORS; ++i) {
             Logger::printSensorData(SENSOR_CHANNELS[i], sensorData[i].distance,
                                     sensorData[i].valid);
@@ -143,7 +143,7 @@ void loop() {
         }
 
         // =========================================================================
-        // Phase 2: 緊急停止チェック（前方障害物検出）
+        // Phase 2: emergency stop check (front obstacle)
         // =========================================================================
         bool emergency_stop = false;
         if (sensorData[FRONT_SENSOR_INDEX].valid &&
@@ -153,38 +153,38 @@ void loop() {
         }
 
         // =========================================================================
-        // Phase 3: ギャップ検出（最遠+隣接センサー方式）
+        // Phase 3: gap detection (farthest sensor + neighbors)
         // =========================================================================
         GapResult gap = gapFinder.find(sensorData);
 
-        // デバッグ: ギャップ検出結果表示（Ldは正面センサー距離）
+        // Debug: print gap result (Ld is derived from the front sensor distance)
         float front_distance = sensorData[FRONT_SENSOR_INDEX].valid
                                ? sensorData[FRONT_SENSOR_INDEX].distance
                                : 0.0f;
         Logger::printGapResult(gap.target_angle, front_distance);
 
         // =========================================================================
-        // Phase 4: ステアリング角度計算（Pure Pursuit）
+        // Phase 4: steering angle (Pure Pursuit)
         // =========================================================================
         float steering_angle = steeringController.calculate(gap, sensorData);
 
-        // デバッグ: 目標角度とステアリング表示
+        // Debug: print target/steering angles
         Logger::printSteering(steering_angle);
 
         // =========================================================================
-        // Phase 5: アクチュエーター制御
+        // Phase 5: actuators
         // =========================================================================
         if (emergency_stop) {
-            // 緊急停止：中央ステアリング + 停止
+            // Emergency stop: center the steering and cut power.
             actuator.setSteering(0.0);
             actuator.stop();
         } else {
-            // 通常走行：定速
+            // Normal cruise.
             actuator.setSteering(steering_angle);
             actuator.setSpeed(SPEED_US);
         }
 
-        // タイミング計測終了・表示
+        // Loop timer end + print
         unsigned long loopEndUs = micros();
         unsigned long loopElapsedUs = loopEndUs - loopStartUs;
         Logger::printLoopTiming(loopElapsedUs, sensorElapsedUs);
